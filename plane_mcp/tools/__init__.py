@@ -22,6 +22,7 @@ from plane_mcp.tools.work_item_relations import register_work_item_relation_tool
 from plane_mcp.tools.work_item_types import register_work_item_type_tools
 from plane_mcp.tools.work_items import register_work_item_tools
 from plane_mcp.tools.work_logs import register_work_log_tools
+from plane_mcp.tools.workload import register_workload_tools
 from plane_mcp.tools.workspaces import register_workspace_tools
 
 
@@ -48,3 +49,4 @@ def register_tools(mcp: FastMCP) -> None:
     register_workspace_tools(mcp)
     register_milestone_tools(mcp)
     register_pql_tools(mcp)
+    register_workload_tools(mcp)
