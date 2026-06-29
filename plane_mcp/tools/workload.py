@@ -104,6 +104,32 @@ def register_workload_tools(mcp: FastMCP) -> None:
         return _send(client, "GET", path, params=params)
 
     @mcp.tool()
+    def get_issue_workload_estimates_bulk(
+        issue_ids: list[str],
+    ) -> dict[str, float]:
+        """
+        Get time estimates (in hours) for many work items in one request.
+
+        This is the bulk companion to `get_issue_workload_estimate` — it avoids
+        an N+1 of per-issue calls when you need the estimates for a list of
+        work items (e.g. rendering a grid). The lookup is workspace-scoped and
+        respects project membership + the guest "only my assigned issues" rule.
+
+        Args:
+            issue_ids: List of work-item UUIDs (max 500). Empty or all-invalid
+                lists are rejected by the server with a 400.
+
+        Returns:
+            A mapping of work-item UUID -> estimated hours, e.g.
+            `{"<uuid>": 3.5, "<uuid>": 0}`. Work items with no stored estimate
+            (or outside the caller's accessible projects) are omitted; a stored
+            value of `0` IS returned.
+        """
+        client, workspace_slug = get_plane_client_context()
+        path = f"/workspaces/{workspace_slug}/workload-estimates/"
+        return _send(client, "GET", path, params={"issue_ids": ",".join(issue_ids)})
+
+    @mcp.tool()
     def get_issue_workload_estimate(
         project_id: str,
         work_item_id: str,
