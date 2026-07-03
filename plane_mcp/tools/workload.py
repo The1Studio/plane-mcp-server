@@ -40,6 +40,25 @@ def _send(
         headers["Content-Type"] = "application/json"
 
     response = httpx.request(method, url, headers=headers, json=json, params=params, timeout=_TIMEOUT)
+    if response.status_code >= 400:
+        # Surface the server's error payload ({"error", "error_code"?}) instead
+        # of httpx's bare status line — e.g. PUT on a parent issue returns
+        # 400 {"error": "...", "error_code": "PARENT_HAS_CHILDREN"} and the
+        # caller needs both to react meaningfully.
+        detail = ""
+        try:
+            body = response.json()
+            detail = body.get("error") or ""
+            if body.get("error_code"):
+                detail = f"{detail} [{body['error_code']}]".strip()
+        except Exception:  # noqa: BLE001 — non-JSON error body; fall through
+            pass
+        if detail:
+            raise httpx.HTTPStatusError(
+                f"{response.status_code} {response.reason_phrase} for {url}: {detail}",
+                request=response.request,
+                response=response,
+            )
     response.raise_for_status()
     if response.status_code == 204 or not response.content:
         return None
@@ -74,6 +93,12 @@ def register_workload_tools(mcp: FastMCP) -> None:
             state_group: Optional list of state groups to include
                 (backlog, unstarted, started, completed, cancelled). Default
                 excludes completed + cancelled.
+
+        Note:
+            The matrix counts LEAF work items only — a parent (an item with
+            sub-items) never appears as its own hours row; its hours live on
+            its sub-items (prevents double-counting). Use
+            `get_workload_rollups` to read a parent's derived totals.
             project_id: Optional single project UUID — when set, queries the
                 project-scoped workload route instead of the workspace route.
 
@@ -123,10 +148,44 @@ def register_workload_tools(mcp: FastMCP) -> None:
             A mapping of work-item UUID -> estimated hours, e.g.
             `{"<uuid>": 3.5, "<uuid>": 0}`. Work items with no stored estimate
             (or outside the caller's accessible projects) are omitted; a stored
-            value of `0` IS returned.
+            value of `0` IS returned. PARENT work items (those with sub-items)
+            are ALSO omitted — a parent looks like "no estimate" here; read its
+            derived totals via `get_workload_rollups` instead.
         """
         client, workspace_slug = get_plane_client_context()
         path = f"/workspaces/{workspace_slug}/workload-estimates/"
+        return _send(client, "GET", path, params={"issue_ids": ",".join(issue_ids)})
+
+    @mcp.tool()
+    def get_workload_rollups(
+        issue_ids: list[str],
+    ) -> dict[str, Any]:
+        """
+        Get derived (rolled-up) workload data for PARENT work items — items
+        that have sub-items. Parents never carry their own estimate; their
+        hours, due date and progress are computed from their sub-item tree.
+
+        Rollup semantics: full-tree recursion (depth 10) over "countable"
+        descendants (not deleted/archived/draft, state group not cancelled or
+        triage). `hours` = sum of leaf estimates; `done_hours` = sum of leaf
+        estimates in completed-group states; `percent` = done_hours / hours
+        (0..1 fraction, null when hours is 0); `due_date` = max target_date
+        over all countable descendants; `leaf_count` = leaves with an estimate.
+        Guests with restricted visibility get scope-partial rollups by design.
+
+        Args:
+            issue_ids: List of work-item UUIDs (max 500). Empty or all-invalid
+                lists are rejected by the server with a 400.
+
+        Returns:
+            A mapping of work-item UUID -> rollup object for the ids that ARE
+            parents; non-parent (leaf) ids are omitted. Example:
+            `{"<uuid>": {"hours": 10.0, "done_hours": 6.0, "percent": 0.6,
+            "due_date": "2026-08-12", "leaf_count": 2}}`. An empty mapping
+            means none of the requested items have sub-items.
+        """
+        client, workspace_slug = get_plane_client_context()
+        path = f"/workspaces/{workspace_slug}/workload-rollups/"
         return _send(client, "GET", path, params={"issue_ids": ",".join(issue_ids)})
 
     @mcp.tool()
@@ -143,6 +202,10 @@ def register_workload_tools(mcp: FastMCP) -> None:
 
         Returns:
             The estimate object, or `{"hours": null}` when none is set.
+            For a PARENT work item (one with sub-items) the response is
+            `{"hours": null, "is_parent": true, "rollup": {hours, done_hours,
+            percent, due_date, leaf_count}}` — parents never carry their own
+            estimate; the rollup is derived from their sub-item tree.
         """
         client, workspace_slug = get_plane_client_context()
         path = f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/workload-estimate/"
@@ -164,6 +227,12 @@ def register_workload_tools(mcp: FastMCP) -> None:
 
         Returns:
             The created/updated estimate object.
+
+        Raises:
+            400 with error_code PARENT_HAS_CHILDREN when the work item has
+            sub-items — parents derive their estimate from the sub-item tree
+            (see `get_workload_rollups`); set estimates on the sub-items
+            instead.
         """
         client, workspace_slug = get_plane_client_context()
         path = f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/workload-estimate/"
