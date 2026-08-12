@@ -145,6 +145,15 @@ The server provides comprehensive tools for interacting with Plane. All tools us
 | `get_project_worklog_summary` | Get work log summary for a project |
 | `get_project_members` | Get all members of a project |
 | `update_project_features` | Update features configuration of a project |
+| `get_project_visibility` | Get a project's visibility (private vs public) † |
+| `set_project_visibility` | Set a project private or public † |
+| `set_projects_visibility_bulk` | Set visibility on many projects in one request † |
+
+† Visibility tools require the The1Studio fork's `project_ext` app on the server
+(404 against upstream Plane / Plane Cloud). They exist because `network` is missing
+from the core `/api/v1/` project serializer, so `update_project(network=...)` is
+silently ignored — it returns 200 OK without changing anything. `update_project`
+now rejects `network` outright and points here instead.
 
 ### Work Items
 

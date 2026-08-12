@@ -24,6 +24,7 @@ from plane.models.query_params import PaginatedQueryParams
 from plane.models.users import UserLite
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.tools.workload import _send
 
 
 def register_project_tools(mcp: FastMCP) -> None:
@@ -125,12 +126,23 @@ def register_project_tools(mcp: FastMCP) -> None:
             timezone if timezone in get_args(TimezoneEnum) else None  # type: ignore[assignment]
         )
 
+        # UPSTREAM BUG WORKAROUND — do NOT send project_lead in the create call.
+        #
+        # plane/api/views/project.py passes the resolved `project_lead` *User
+        # object* into `ProjectMember.objects.create(member_id=...)`, which
+        # expects a UUID. Django raises ValidationError, which the API's
+        # handle_exception turns into `400 {"error": "Please provide valid
+        # detail"}` — but the POST body is not wrapped in a transaction, so the
+        # project is already committed. Net effect: the caller sees a 400, the
+        # project exists anyway, and the lead has no ProjectMember row.
+        #
+        # So: create without the lead (clean 201), then apply lead/assignee via
+        # update, then add the lead as a project member — which is what the
+        # create path was trying (and failing) to do itself.
         data = CreateProject(
             name=name,
             identifier=identifier,
             description=description,
-            project_lead=project_lead,
-            default_assignee=default_assignee,
             emoji=emoji,
             cover_image=cover_image,
             module_view=module_view,
@@ -147,7 +159,33 @@ def register_project_tools(mcp: FastMCP) -> None:
             is_issue_type_enabled=is_issue_type_enabled,
         )
 
-        return client.projects.create(workspace_slug=workspace_slug, data=data)
+        project = client.projects.create(workspace_slug=workspace_slug, data=data)
+
+        if project_lead is None and default_assignee is None:
+            return project
+
+        project = client.projects.update(
+            workspace_slug=workspace_slug,
+            project_id=str(project.id),
+            data=UpdateProject(project_lead=project_lead, default_assignee=default_assignee),
+        )
+
+        # Setting project_lead alone does not make that user a project member —
+        # core only creates the ProjectMember row on the create path, which we
+        # deliberately bypassed above. Without this the lead is stored but shows
+        # up nowhere in the UI.
+        if project_lead is not None:
+            try:
+                _send(
+                    client,
+                    "POST",
+                    f"/workspaces/{workspace_slug}/projects/{project.id}/members/",
+                    json={"member": project_lead, "role": 20},
+                )
+            except Exception:  # noqa: BLE001 — already a member is fine; project is created either way
+                pass
+
+        return project
 
     @mcp.tool()
     def retrieve_project(project_id: str) -> Project:
@@ -224,15 +262,23 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Updated Project object
         """
-        if network is not None and network not in {0, 2}:
-            raise ValueError("network must be 0 (secret) or 2 (public)")
-
         client, workspace_slug = get_plane_client_context()
 
         # Validate timezone against allowed literal values
         validated_timezone: TimezoneEnum | None = (
             timezone if timezone in get_args(TimezoneEnum) else None  # type: ignore[assignment]
         )
+
+        # `network` is NOT in the core /api/v1/ project serializer
+        # (plane.api.serializers.project.ProjectCreateSerializer.Meta.fields), so
+        # DRF drops it and the PATCH returns 200 OK with visibility unchanged.
+        # Failing loudly beats reporting a success that did nothing.
+        if network is not None:
+            raise ValueError(
+                "update_project cannot change visibility: the Plane /api/v1/ project "
+                "serializer does not expose `network`, so it is silently ignored. "
+                "Use set_project_visibility(project_id, 'private'|'public') instead."
+            )
 
         data = UpdateProject(
             name=name,
@@ -242,7 +288,6 @@ def register_project_tools(mcp: FastMCP) -> None:
             identifier=identifier,
             emoji=emoji,
             cover_image=cover_image,
-            network=network,
             module_view=module_view,
             cycle_view=cycle_view,
             issue_views_view=issue_views_view,
