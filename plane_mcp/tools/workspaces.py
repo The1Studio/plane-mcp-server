@@ -17,41 +17,83 @@ def register_workspace_tools(mcp: FastMCP) -> None:
     """Register all workspace-related tools with the MCP server."""
 
     @mcp.tool()
-    def list_workspaces() -> dict:
+    def list_workspaces(candidates: list[str] | None = None) -> dict:
         """
-        List the workspaces this server is configured to address, and report
-        which of them the current credentials can actually reach.
+        Report which workspaces this server can actually reach, probing both the
+        configured slugs and any candidate slugs you supply.
 
         NOTE ON DISCOVERY: Plane's public API exposes no workspace-listing
-        endpoint, so this cannot enumerate every workspace your account belongs
-        to -- it reports the set declared in PLANE_WORKSPACE_SLUG /
-        PLANE_WORKSPACE_SLUGS, each probed live. A workspace missing from the
-        result is missing from the server's configuration, not necessarily from
-        your account.
+        endpoint -- /api/v1/workspaces/ does not exist, and the web app's
+        /api/users/me/workspaces/ rejects API keys (it needs a browser session).
+        So this CANNOT enumerate the workspaces your account belongs to. It
+        probes a set of slugs you name. A workspace missing from the result is
+        missing from that set, not necessarily from your account.
+
+        FINDING YOUR SLUG: it is the first path segment when you are logged into
+        Plane -- <base-url>/<slug>/projects/. Read it from the browser address
+        bar, then pass it here as a candidate to confirm before committing it to
+        config.
+
+        UNREACHABLE IS AMBIGUOUS: Plane answers a wrong slug and a real slug you
+        lack access to with the same 403, so `reachable: false` means "this slug
+        did not work", never "this workspace does not exist".
+
+        Args:
+            candidates: Extra slugs to probe alongside the configured ones. Use
+                this to test a slug without restarting the server.
 
         Returns:
-            dict with `active` (session default), `default` (env default) and
-            `workspaces`: one entry per configured slug carrying `slug`,
-            `reachable`, and either `project_count` or `error`.
+            dict with `active` (session default), `default` (env default),
+            `workspaces` (one entry per probed slug carrying `slug`, `source`,
+            `reachable`, and either `project_count` or `error`), and `note` when
+            there was nothing to probe.
         """
-        slugs = get_configured_workspace_slugs()
-        entries: list[dict] = []
+        configured = get_configured_workspace_slugs()
+        extra = [s.strip() for s in (candidates or []) if s and s.strip()]
 
-        for slug in slugs:
+        probed: list[tuple[str, str]] = [(s, "configured") for s in configured]
+        seen = set(configured)
+        for slug in extra:
+            if slug not in seen:
+                seen.add(slug)
+                probed.append((slug, "candidate"))
+
+        entries: list[dict] = []
+        for slug, source in probed:
             client, _ = get_plane_client_context(workspace_slug=slug)
             try:
                 projects = client.projects.list(workspace_slug=slug)
                 count = len(getattr(projects, "results", projects) or [])
-                entries.append({"slug": slug, "reachable": True, "project_count": count})
+                entries.append({"slug": slug, "source": source, "reachable": True, "project_count": count})
             except Exception as exc:  # noqa: BLE001 - surfaced per-slug, never fatal
-                entries.append({"slug": slug, "reachable": False, "error": str(exc)})
+                entries.append({"slug": slug, "source": source, "reachable": False, "error": str(exc)})
 
-        return {
+        result = {
             "active": get_active_workspace(),
-            "default": slugs[0] if slugs else None,
-            "configured_count": len(slugs),
+            "default": configured[0] if configured else None,
+            "configured_count": len(configured),
+            "probed_count": len(probed),
             "workspaces": entries,
         }
+
+        # An empty result must not read like "you belong to no workspaces" --
+        # say plainly that nothing was probed and how to fix it.
+        if not probed:
+            result["note"] = (
+                "Nothing to probe: no workspace configured and no candidates given. "
+                "Plane cannot enumerate workspaces, so pass candidates=['<slug>'] "
+                "with the first path segment of your Plane URL "
+                "(<base-url>/<slug>/projects/), or set PLANE_WORKSPACE_SLUG."
+            )
+        elif not any(e["reachable"] for e in entries):
+            result["note"] = (
+                "No probed slug was reachable. Plane returns the same 403 for a "
+                "wrong slug and for a workspace you lack access to, so check the "
+                "spelling against your Plane URL and confirm the API key belongs "
+                "to an account in that workspace."
+            )
+
+        return result
 
     @mcp.tool()
     def set_workspace(workspace_slug: str | None = None) -> dict:

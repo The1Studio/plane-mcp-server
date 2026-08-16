@@ -107,11 +107,20 @@ def main() -> None:
         server_mode = ServerMode(sys.argv[1])
 
     if server_mode == ServerMode.STDIO:
-        # Validate API_KEY and PLANE_WORKSPACE_SLUG are set
+        # The API key is the only hard requirement: without it no call can be
+        # authenticated, so failing at startup is strictly better than failing
+        # on every tool call.
+        #
+        # PLANE_WORKSPACE_SLUG is deliberately NOT required. Plane's public API
+        # exposes no workspace-listing endpoint, so an operator installing this
+        # server often cannot look their slug up without first logging into the
+        # web UI -- and requiring it here turned a discoverable runtime question
+        # into an install-time blocker. Every workspace-aware tool accepts a
+        # per-call `workspace_slug`, `set_workspace` sets a session default, and
+        # `list_workspaces` probes candidates, so a slug-less server starts fine
+        # and is usable the moment the caller names a workspace.
         if not os.getenv("PLANE_API_KEY"):
             raise ValueError("PLANE_API_KEY is not set")
-        if not os.getenv("PLANE_WORKSPACE_SLUG"):
-            raise ValueError("PLANE_WORKSPACE_SLUG is not set")
 
         get_stdio_mcp().run()
         return

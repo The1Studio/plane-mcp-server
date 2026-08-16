@@ -10,6 +10,7 @@ if the override stopped winning.
 import pytest
 
 from plane_mcp.client import (
+    MissingWorkspaceError,
     get_active_workspace,
     get_configured_workspace_slugs,
     get_plane_client_context,
@@ -100,3 +101,45 @@ class TestResolutionOrder:
         set_active_workspace("   ")
         assert get_active_workspace() is None
         assert get_plane_client_context().workspace_slug == "marketing"
+
+
+class TestSlugLessServer:
+    """The server must start and stay usable with no PLANE_WORKSPACE_SLUG set.
+
+    Requiring the slug at startup made an undiscoverable value an install-time
+    blocker: Plane exposes no workspace-listing endpoint, so an operator cannot
+    look it up from the API. These pin the two halves of the fix -- an
+    unresolved workspace fails loudly at the call that needs it, and a call that
+    genuinely does not need one still works.
+    """
+
+    def test_unresolved_workspace_raises(self):
+        with pytest.raises(MissingWorkspaceError):
+            get_plane_client_context()
+
+    def test_error_names_the_ways_to_supply_one(self):
+        """An unactionable error here sends the operator back to reinstalling."""
+        with pytest.raises(MissingWorkspaceError) as excinfo:
+            get_plane_client_context()
+        message = str(excinfo.value)
+        assert "workspace_slug" in message
+        assert "set_workspace" in message
+        assert "PLANE_WORKSPACE_SLUG" in message
+
+    def test_empty_slug_never_reaches_the_sdk(self):
+        """An empty slug builds `/workspaces//...` and 404s opaquely."""
+        with pytest.raises(MissingWorkspaceError):
+            get_plane_client_context("   ")
+
+    def test_workspace_independent_call_still_works(self):
+        """get_me hits /users/me/ -- it must not need a workspace."""
+        ctx = get_plane_client_context(require_workspace=False)
+        assert ctx.workspace_slug == ""
+        assert ctx.client is not None
+
+    def test_per_call_slug_satisfies_the_requirement(self):
+        assert get_plane_client_context("unity").workspace_slug == "unity"
+
+    def test_session_default_satisfies_the_requirement(self):
+        set_active_workspace("unity")
+        assert get_plane_client_context().workspace_slug == "unity"
