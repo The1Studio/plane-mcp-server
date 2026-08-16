@@ -117,15 +117,34 @@ The server requires authentication via environment variables:
 
 - `PLANE_BASE_URL`: Base URL for Plane API (default: `https://api.plane.so`) - Optional
 - `PLANE_API_KEY`: API key for authentication (required for stdio transport)
-- `PLANE_WORKSPACE_SLUG`: Workspace slug identifier (required for stdio transport)
+- `PLANE_WORKSPACE_SLUG`: Default workspace slug — **optional**. The server starts without it; name a workspace per-call or via `set_workspace`.
+- `PLANE_WORKSPACE_SLUGS`: Additional slugs this server may address (comma- or newline-separated) - Optional
 - `PLANE_ACCESS_TOKEN`: Access token for authentication (alternative to API key)
 
 **Example** (for stdio transport):
 ```bash
 export PLANE_BASE_URL="https://api.plane.so"
 export PLANE_API_KEY="your-api-key"
-export PLANE_WORKSPACE_SLUG="your-workspace-slug"
+export PLANE_WORKSPACE_SLUG="your-workspace-slug"   # optional
 ```
+
+### Don't know your workspace slug?
+
+Plane's public API exposes no workspace-listing endpoint — `/api/v1/workspaces/`
+does not exist, and the web app's `/api/users/me/workspaces/` rejects API keys —
+so the slug cannot be discovered programmatically. It is the first path segment
+when you are logged into Plane: `<base-url>/<slug>/projects/`.
+
+Install without it, then find it at runtime:
+
+1. `get_me` — confirms the API key works (it is workspace-independent).
+2. `list_workspaces(candidates=["guess-a", "guess-b"])` — probes slugs and
+   reports which are reachable.
+3. `set_workspace("<slug>")` — makes it the session default once confirmed.
+
+Note that Plane answers a wrong slug and a real workspace you lack access to
+with the same `403`, so an unreachable result means "this slug did not work",
+never "this workspace does not exist".
 
 **Note**: For remote HTTP transports (OAuth or PAT), authentication is handled via the connection method (OAuth flow or PAT headers) and does not require these environment variables.
 

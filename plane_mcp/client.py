@@ -65,7 +65,24 @@ def get_configured_workspace_slugs() -> list[str]:
     return ordered
 
 
-def get_plane_client_context(workspace_slug: str | None = None) -> PlaneClientContext:
+class MissingWorkspaceError(ValueError):
+    """Raised when a workspace-scoped call has no workspace slug to target."""
+
+
+_MISSING_WORKSPACE_HELP = (
+    "No Plane workspace slug resolved for this call. This server can run without "
+    "PLANE_WORKSPACE_SLUG set, so name a workspace one of these ways:\n"
+    "  - pass `workspace_slug` on this call, or\n"
+    "  - call `set_workspace('<slug>')` once to set a session default, or\n"
+    "  - set PLANE_WORKSPACE_SLUG in the server environment.\n"
+    "Your slug is the first path segment when you are logged into Plane: "
+    "<base-url>/<slug>/projects/. Plane's public API exposes no workspace-listing "
+    "endpoint, so it cannot be discovered automatically -- `list_workspaces` can "
+    "probe candidate slugs for you."
+)
+
+
+def get_plane_client_context(workspace_slug: str | None = None, require_workspace: bool = True) -> PlaneClientContext:
     """
     Initialize and return a PlaneClient instance with workspace context.
 
@@ -89,12 +106,17 @@ def get_plane_client_context(workspace_slug: str | None = None) -> PlaneClientCo
     Args:
         workspace_slug: Address a workspace other than the session default for
             this call only. Omit to use the resolution order above.
+        require_workspace: Raise MissingWorkspaceError when the order above
+            resolves nothing. Pass False for the rare call that is genuinely
+            workspace-independent (e.g. `get_me`, which hits /users/me/), so a
+            server started without PLANE_WORKSPACE_SLUG can still verify its
+            credentials.
 
     Returns:
         PlaneClientContext containing configured PlaneClient instance and workspace slug
 
     Raises:
-        ConfigurationError: If access token is not available or workspace slug is missing
+        MissingWorkspaceError: If require_workspace and no slug could be resolved
     """
     base_url = os.getenv("PLANE_INTERNAL_BASE_URL") or os.getenv("PLANE_BASE_URL", "https://api.plane.so")
     resolved_slug = os.getenv("PLANE_WORKSPACE_SLUG", "")
@@ -122,6 +144,13 @@ def get_plane_client_context(workspace_slug: str | None = None) -> PlaneClientCo
         resolved_slug = active
     if workspace_slug and workspace_slug.strip():
         resolved_slug = workspace_slug.strip()
+
+    resolved_slug = (resolved_slug or "").strip()
+    if require_workspace and not resolved_slug:
+        # Fail here, with instructions, rather than handing the SDK an empty
+        # slug -- that builds a `/workspaces//...` URL and surfaces as an
+        # opaque 404 that reads like the resource is missing.
+        raise MissingWorkspaceError(_MISSING_WORKSPACE_HELP)
 
     if access_token:
         client = PlaneClient(

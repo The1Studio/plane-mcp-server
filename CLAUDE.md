@@ -39,7 +39,7 @@ ruff check plane_mcp/
 ### Entry Point & Transport Modes
 
 `plane_mcp/__main__.py` parses a positional arg (`stdio`, `http`, or `sse`) and launches the corresponding server:
-- **stdio**: Requires `PLANE_API_KEY` + `PLANE_WORKSPACE_SLUG` env vars. Runs locally.
+- **stdio**: Requires `PLANE_API_KEY`. `PLANE_WORKSPACE_SLUG` is optional — the server starts without it, and callers name a workspace per-call or via `set_workspace`. Runs locally.
 - **http**: Starts on port 8211 with two auth endpoints — OAuth (`/oauth/mcp`) and header-based PAT (`/http/api-key/mcp`).
 - **sse**: Legacy OAuth-only SSE transport.
 
@@ -81,7 +81,7 @@ Integration tests in `tests/test_integration.py` use `FastMCP.Client` with `Stre
 | Variable | Required For | Purpose |
 |---|---|---|
 | `PLANE_API_KEY` | stdio | API key for authentication |
-| `PLANE_WORKSPACE_SLUG` | stdio | Target workspace |
+| `PLANE_WORKSPACE_SLUG` | none (optional) | Default workspace. Omit it and name a workspace per-call, or via `set_workspace`. Plane exposes no workspace-listing endpoint, so this is often unknown at install time. |
 | `PLANE_BASE_URL` | all (default: https://api.plane.so) | Plane API URL |
 | `PLANE_INTERNAL_BASE_URL` | http/sse (optional) | Internal URL for server-to-server calls |
 | `REDIS_HOST` / `REDIS_PORT` | http/sse (optional) | Token storage (falls back to in-memory) |

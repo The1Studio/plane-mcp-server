@@ -14,8 +14,12 @@ def register_user_tools(mcp: FastMCP) -> None:
         """
         Get current user information.
 
+        Hits /users/me/, which is workspace-independent, so this works even when
+        the server has no workspace configured -- use it to confirm the API key
+        is valid before hunting for a workspace slug.
+
         Returns:
             UserLite object containing current user information
         """
-        client, workspace_slug = get_plane_client_context(workspace_slug)
+        client, workspace_slug = get_plane_client_context(workspace_slug, require_workspace=False)
         return client.users.get_me()
