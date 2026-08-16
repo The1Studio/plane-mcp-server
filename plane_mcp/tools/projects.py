@@ -2,6 +2,7 @@
 
 from typing import Any, get_args
 
+import httpx
 from fastmcp import FastMCP
 from plane.models.enums import TimezoneEnum
 from plane.models.estimates import (
@@ -25,6 +26,31 @@ from plane.models.users import UserLite
 
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.tools.workload import _send
+
+# Fork-owned bulk endpoint segment for `add_project_members` (The1Studio
+# fork's project_ext app). `project_ext` mounts before plane.api.urls, so this
+# name must NOT collide with a core route — core already owns
+# `/workspaces/<slug>/projects/<id>/members/`, which is why this is a
+# workspace-level bulk path instead. Named once here so a rename (if this
+# segment turns out to be taken) is a one-line change.
+_BULK_ADD_MEMBERS_PATH_SEGMENT = "project-members"
+
+
+def _fork_endpoint_error(feature: str, exc: httpx.HTTPStatusError) -> RuntimeError:
+    """Turn a raw 404 from a `project_ext` (The1Studio fork) endpoint into an
+    actionable message.
+
+    A bare `httpx.HTTPStatusError` reads as an opaque stack trace, and
+    swallowing it into an empty result would misread as "nothing here" for an
+    admin-only listing endpoint — the exact misreading this feature exists to
+    prevent. So: catch it, name the real cause, re-raise.
+    """
+    return RuntimeError(
+        f"{feature} requires the The1Studio Plane fork's `project_ext` API "
+        "endpoints, which returned 404 on this server. Either this deployment "
+        "predates that fork feature, or it is upstream Plane / Plane Cloud "
+        "rather than the fork — neither exposes this endpoint."
+    )
 
 
 def register_project_tools(mcp: FastMCP) -> None:
@@ -69,6 +95,36 @@ def register_project_tools(mcp: FastMCP) -> None:
         )
 
         return response.results
+
+    @mcp.tool()
+    def list_all_projects(workspace_slug: str | None = None) -> dict[str, Any]:
+        """
+        List every project in the workspace, regardless of the caller's project membership.
+
+        `list_projects` calls the core Plane API, which only returns PUBLIC
+        projects (network=2) plus projects the caller is already a *project
+        member* of — being a workspace ADMIN is NOT enough to see a private
+        project you have not joined. This tool exists for exactly that gap:
+        find a private project here, then call `add_project_member` to join it.
+
+        Requires workspace admin. Requires the The1Studio fork's `project_ext`
+        app on the server (404 against upstream Plane / Plane Cloud, or a
+        fork deployment older than this endpoint).
+
+        Args:
+            workspace_slug: Address a workspace other than the session default.
+
+        Returns:
+            {workspace_slug, count, results: [{id, name, identifier, network,
+            visibility, is_member}]}
+        """
+        client, workspace_slug = get_plane_client_context(workspace_slug)
+        try:
+            return _send(client, "GET", f"/workspaces/{workspace_slug}/all-projects/")
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                raise _fork_endpoint_error("list_all_projects", exc) from exc
+            raise
 
     @mcp.tool()
     def create_project(
@@ -372,6 +428,71 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id, params=params)
+
+    @mcp.tool()
+    def add_project_members(
+        project_ids: list[str],
+        user_id: str | None = None,
+        email: str | None = None,
+        role: int = 15,
+        workspace_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Add one member to many projects in a single request, by user_id or email.
+
+        Bulk companion to `list_all_projects`: find the projects a person
+        needs there, then join all of them here in one call — the common
+        case ("add this person to every project in the workspace") would
+        otherwise be one HTTP round-trip per project. The standard Plane API
+        has no endpoint to add a project member at all; membership can
+        otherwise only be granted through the web UI.
+
+        NOTE: core Plane already owns `/projects/<id>/members/` (the
+        per-project path) — this deliberately calls the workspace-level bulk
+        path instead so it doesn't collide with that core route.
+
+        Idempotent per project: a project where the user is already a member
+        reports `created: false` in its result entry rather than erroring.
+
+        Requires workspace admin. Requires the The1Studio fork's `project_ext`
+        app on the server (404 against upstream Plane / Plane Cloud, or a
+        fork deployment older than this endpoint). Every project_id must
+        belong to the target workspace — a single unknown id fails the WHOLE
+        call, no partial apply.
+
+        Args:
+            project_ids: UUIDs of the projects to add the member to. Must be non-empty.
+            user_id: UUID of the user to add. Provide this or `email`.
+            email: Email of the user to add, if `user_id` is not known.
+            role: Project role — 20 (Admin), 15 (Member, default), or 5 (Guest).
+            workspace_slug: Address a workspace other than the session default.
+
+        Returns:
+            {user_id, email, role, results: [{project_id, created}, ...]}
+        """
+        if not project_ids:
+            raise ValueError("add_project_members requires at least one project_id")
+        if not user_id and not email:
+            raise ValueError("add_project_members requires either user_id or email")
+
+        client, workspace_slug = get_plane_client_context(workspace_slug)
+        body: dict[str, Any] = {"project_ids": project_ids, "role": role}
+        if user_id:
+            body["user_id"] = user_id
+        if email:
+            body["email"] = email
+
+        try:
+            return _send(
+                client,
+                "POST",
+                f"/workspaces/{workspace_slug}/{_BULK_ADD_MEMBERS_PATH_SEGMENT}/",
+                json=body,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response is not None and exc.response.status_code == 404:
+                raise _fork_endpoint_error("add_project_members", exc) from exc
+            raise
 
     @mcp.tool()
     def update_project_features(
