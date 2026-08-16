@@ -1,4 +1,4 @@
-"""Tests for `list_all_projects` and `add_project_member` (The1Studio fork feature).
+"""Tests for `list_all_projects` and `add_project_members` (The1Studio fork feature).
 
 Both call the fork's `project_ext` endpoints via the shared `_send` helper (the
 plane-sdk has no methods for either — see `plane_mcp/tools/project_visibility.py`
@@ -155,13 +155,18 @@ class TestListAllProjects:
             fn()
 
 
-class TestAddProjectMember:
-    def test_requires_user_id_or_email(self, mcp):
-        fn = _get_tool_fn(mcp, "add_project_member")
-        with pytest.raises(ValueError, match="user_id or email"):
-            fn(project_id="proj-1")
+class TestAddProjectMembers:
+    def test_requires_at_least_one_project_id(self, mcp):
+        fn = _get_tool_fn(mcp, "add_project_members")
+        with pytest.raises(ValueError, match="at least one project_id"):
+            fn(project_ids=[], user_id="user-1")
 
-    def test_sends_user_id_body(self, monkeypatch, mcp):
+    def test_requires_user_id_or_email(self, mcp):
+        fn = _get_tool_fn(mcp, "add_project_members")
+        with pytest.raises(ValueError, match="user_id or email"):
+            fn(project_ids=["proj-1"])
+
+    def test_sends_user_id_body_to_bulk_path(self, monkeypatch, mcp):
         client = _FakeClient()
         _stub_context(monkeypatch, client)
 
@@ -171,18 +176,27 @@ class TestAddProjectMember:
             captured.update(method=method, url=url, json=json)
             return _mock_response(
                 200,
-                {"project_id": "proj-1", "user_id": "user-1", "email": None, "role": 15, "created": True},
+                {
+                    "user_id": "user-1",
+                    "email": None,
+                    "role": 15,
+                    "results": [
+                        {"project_id": "proj-1", "created": True},
+                        {"project_id": "proj-2", "created": False},
+                    ],
+                },
             )
 
         monkeypatch.setattr("plane_mcp.tools.workload.httpx.request", _fake_request)
 
-        fn = _get_tool_fn(mcp, "add_project_member")
-        result = fn(project_id="proj-1", user_id="user-1")
+        fn = _get_tool_fn(mcp, "add_project_members")
+        result = fn(project_ids=["proj-1", "proj-2"], user_id="user-1")
 
         assert captured["method"] == "POST"
-        assert captured["url"] == "https://plane.the1studio.org/api/v1/workspaces/unity/projects/proj-1/members/"
-        assert captured["json"] == {"role": 15, "user_id": "user-1"}
-        assert result["created"] is True
+        assert captured["url"] == "https://plane.the1studio.org/api/v1/workspaces/unity/project-members/"
+        assert captured["json"] == {"project_ids": ["proj-1", "proj-2"], "role": 15, "user_id": "user-1"}
+        assert result["results"][0] == {"project_id": "proj-1", "created": True}
+        assert result["results"][1] == {"project_id": "proj-2", "created": False}
 
     def test_sends_email_body_and_custom_role(self, monkeypatch, mcp):
         client = _FakeClient()
@@ -194,15 +208,20 @@ class TestAddProjectMember:
             captured["json"] = json
             return _mock_response(
                 200,
-                {"project_id": "proj-1", "user_id": "user-2", "email": "a@b.com", "role": 20, "created": True},
+                {
+                    "user_id": None,
+                    "email": "a@b.com",
+                    "role": 20,
+                    "results": [{"project_id": "proj-1", "created": True}],
+                },
             )
 
         monkeypatch.setattr("plane_mcp.tools.workload.httpx.request", _fake_request)
 
-        fn = _get_tool_fn(mcp, "add_project_member")
-        fn(project_id="proj-1", email="a@b.com", role=20)
+        fn = _get_tool_fn(mcp, "add_project_members")
+        fn(project_ids=["proj-1"], email="a@b.com", role=20)
 
-        assert captured["json"] == {"role": 20, "email": "a@b.com"}
+        assert captured["json"] == {"project_ids": ["proj-1"], "role": 20, "email": "a@b.com"}
 
     def test_idempotent_existing_member_reports_created_false(self, monkeypatch, mcp):
         client = _FakeClient()
@@ -211,17 +230,22 @@ class TestAddProjectMember:
         def _fake_request(method, url, headers=None, json=None, params=None, timeout=None):
             return _mock_response(
                 200,
-                {"project_id": "proj-1", "user_id": "user-1", "email": None, "role": 15, "created": False},
+                {
+                    "user_id": "user-1",
+                    "email": None,
+                    "role": 15,
+                    "results": [{"project_id": "proj-1", "created": False}],
+                },
             )
 
         monkeypatch.setattr("plane_mcp.tools.workload.httpx.request", _fake_request)
 
-        fn = _get_tool_fn(mcp, "add_project_member")
-        result = fn(project_id="proj-1", user_id="user-1")
+        fn = _get_tool_fn(mcp, "add_project_members")
+        result = fn(project_ids=["proj-1"], user_id="user-1")
 
-        assert result["created"] is False
+        assert result["results"][0]["created"] is False
 
-    def test_404_raises_actionable_error(self, monkeypatch, mcp):
+    def test_404_raises_actionable_error_when_a_project_id_is_unknown(self, monkeypatch, mcp):
         client = _FakeClient()
         _stub_context(monkeypatch, client)
 
@@ -230,9 +254,9 @@ class TestAddProjectMember:
 
         monkeypatch.setattr("plane_mcp.tools.workload.httpx.request", _fake_request)
 
-        fn = _get_tool_fn(mcp, "add_project_member")
+        fn = _get_tool_fn(mcp, "add_project_members")
         with pytest.raises(RuntimeError, match="project_ext"):
-            fn(project_id="proj-1", user_id="user-1")
+            fn(project_ids=["proj-1", "not-owned-by-workspace"], user_id="user-1")
 
     def test_400_bad_identity_is_not_masked(self, monkeypatch, mcp):
         client = _FakeClient()
@@ -243,6 +267,6 @@ class TestAddProjectMember:
 
         monkeypatch.setattr("plane_mcp.tools.workload.httpx.request", _fake_request)
 
-        fn = _get_tool_fn(mcp, "add_project_member")
+        fn = _get_tool_fn(mcp, "add_project_members")
         with pytest.raises(httpx.HTTPStatusError):
-            fn(project_id="proj-1", user_id="user-1")
+            fn(project_ids=["proj-1"], user_id="user-1")
