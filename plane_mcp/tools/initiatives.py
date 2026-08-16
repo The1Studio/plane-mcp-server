@@ -33,6 +33,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def list_initiatives(
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[Initiative]:
         """
         List all initiatives in a workspace.
@@ -47,7 +48,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             ToolError: if the initiatives feature is disabled. When disabled,
                 initiatives are "Initiative" work items — the error gives the steps.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         _require_native_initiatives(
             client,
             workspace_slug,
@@ -68,6 +69,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         logo_props: dict | None = None,
         state: InitiativeState | str | None = None,
         lead: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Initiative:
         """
         Create a new initiative in the workspace.
@@ -90,7 +92,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
                 When disabled, create an "Initiative" work item instead — the error
                 message gives the exact steps.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         _require_native_initiatives(
             client,
@@ -114,7 +116,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         return client.initiatives.create(workspace_slug=workspace_slug, data=data)
 
     @mcp.tool()
-    def retrieve_initiative(initiative_id: str) -> Initiative:
+    def retrieve_initiative(initiative_id: str, workspace_slug: str | None = None) -> Initiative:
         """
         Retrieve an initiative by ID.
 
@@ -128,7 +130,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             ToolError: if the initiatives feature is disabled. When disabled, the
                 initiative is an "Initiative" work item — the error gives the steps.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         _require_native_initiatives(
             client,
             workspace_slug,
@@ -147,6 +149,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         logo_props: dict | None = None,
         state: InitiativeState | str | None = None,
         lead: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Initiative:
         """
         Update an initiative by ID.
@@ -168,7 +171,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             ToolError: if the initiatives feature is disabled. When disabled, the
                 initiative is an "Initiative" work item — the error gives the steps.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         _require_native_initiatives(
             client,
             workspace_slug,
@@ -189,7 +192,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
         return client.initiatives.update(workspace_slug=workspace_slug, initiative_id=initiative_id, data=data)
 
     @mcp.tool()
-    def delete_initiative(initiative_id: str) -> None:
+    def delete_initiative(initiative_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete an initiative by ID.
 
@@ -200,7 +203,7 @@ def register_initiative_tools(mcp: FastMCP) -> None:
             ToolError: if the initiatives feature is disabled. When disabled, the
                 initiative is an "Initiative" work item — the error gives the steps.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         _require_native_initiatives(
             client,
             workspace_slug,

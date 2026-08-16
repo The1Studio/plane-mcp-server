@@ -16,6 +16,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[WorkItemWorkLog]:
         """
         List work logs for a work item.
@@ -28,7 +29,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         Returns:
             List of WorkItemWorkLog objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.work_items.work_logs.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -42,6 +43,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         work_item_id: str,
         duration: int | None = None,
         description: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemWorkLog:
         """
         Create a work log for a work item.
@@ -55,7 +57,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         Returns:
             Created WorkItemWorkLog object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data: dict[str, Any] = {}
         if duration is not None:
@@ -77,6 +79,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         work_log_id: str,
         duration: int | None = None,
         description: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemWorkLog:
         """
         Update a work log for a work item.
@@ -91,7 +94,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         Returns:
             Updated WorkItemWorkLog object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data: dict[str, Any] = {}
         if duration is not None:
@@ -112,6 +115,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         work_log_id: str,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Delete a work log for a work item.
@@ -121,7 +125,7 @@ def register_work_log_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
             work_log_id: UUID of the work log
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.work_items.work_logs.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,

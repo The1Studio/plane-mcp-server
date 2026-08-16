@@ -20,6 +20,7 @@ def register_label_tools(mcp: FastMCP) -> None:
     def list_labels(
         project_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[Label]:
         """
         List all labels in a project.
@@ -31,7 +32,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         Returns:
             List of Label objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         response: PaginatedLabelResponse = client.labels.list(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
@@ -47,6 +48,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         sort_order: float | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Label:
         """
         Create a new label.
@@ -64,7 +66,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         Returns:
             Created Label object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = CreateLabel(
             name=name,
@@ -79,7 +81,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         return client.labels.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
-    def retrieve_label(project_id: str, label_id: str) -> Label:
+    def retrieve_label(project_id: str, label_id: str, workspace_slug: str | None = None) -> Label:
         """
         Retrieve a label by ID.
 
@@ -90,7 +92,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         Returns:
             Label object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.labels.retrieve(workspace_slug=workspace_slug, project_id=project_id, label_id=label_id)
 
     @mcp.tool()
@@ -104,6 +106,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         sort_order: float | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Label:
         """
         Update a label by ID.
@@ -122,7 +125,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         Returns:
             Updated Label object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = UpdateLabel(
             name=name,
@@ -142,7 +145,7 @@ def register_label_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def delete_label(project_id: str, label_id: str) -> None:
+    def delete_label(project_id: str, label_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete a label by ID.
 
@@ -150,5 +153,5 @@ def register_label_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             label_id: UUID of the label
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.labels.delete(workspace_slug=workspace_slug, project_id=project_id, label_id=label_id)

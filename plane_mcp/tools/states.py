@@ -21,6 +21,7 @@ def register_state_tools(mcp: FastMCP) -> None:
     def list_states(
         project_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[State]:
         """
         List all states in a project.
@@ -32,7 +33,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         Returns:
             List of State objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         response: PaginatedStateResponse = client.states.list(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
@@ -50,6 +51,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         default: bool | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> State:
         """
         Create a new state.
@@ -69,7 +71,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         Returns:
             Created State object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Validate group against allowed literal values
         validated_group: GroupEnum | None = (
@@ -91,7 +93,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         return client.states.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
-    def retrieve_state(project_id: str, state_id: str) -> State:
+    def retrieve_state(project_id: str, state_id: str, workspace_slug: str | None = None) -> State:
         """
         Retrieve a state by ID.
 
@@ -102,7 +104,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         Returns:
             State object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.states.retrieve(workspace_slug=workspace_slug, project_id=project_id, state_id=state_id)
 
     @mcp.tool()
@@ -118,6 +120,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         default: bool | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> State:
         """
         Update a state by ID.
@@ -138,7 +141,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         Returns:
             Updated State object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Validate group against allowed literal values
         validated_group: GroupEnum | None = (
@@ -165,7 +168,7 @@ def register_state_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def delete_state(project_id: str, state_id: str) -> None:
+    def delete_state(project_id: str, state_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete a state by ID.
 
@@ -173,5 +176,5 @@ def register_state_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             state_id: UUID of the state
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.states.delete(workspace_slug=workspace_slug, project_id=project_id, state_id=state_id)

@@ -21,6 +21,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
     def list_intake_work_items(
         project_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[IntakeWorkItem]:
         """
         List all intake work items in a project.
@@ -33,7 +34,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
         Returns:
             List of IntakeWorkItem objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         query_params = None
         if params:
@@ -48,6 +49,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
     def create_intake_work_item(
         project_id: str,
         data: dict[str, Any],
+        workspace_slug: str | None = None,
     ) -> IntakeWorkItem:
         """
         Create a new intake work item in a project.
@@ -60,7 +62,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
         Returns:
             Created IntakeWorkItem object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         intake_data = CreateIntakeWorkItem(**data)
 
@@ -71,6 +73,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> IntakeWorkItem:
         """
         Retrieve an intake work item by work item ID.
@@ -85,7 +88,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
         Returns:
             IntakeWorkItem object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         query_params = None
         if params:
@@ -107,6 +110,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
         duplicate_to: str | None = None,
         source: str | None = None,
         source_email: str | None = None,
+        workspace_slug: str | None = None,
     ) -> IntakeWorkItem:
         """
         Update an intake work item, including triage status.
@@ -136,7 +140,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
         if status == 2 and not duplicate_to:
             raise ValueError("duplicate_to is required when status=2 (duplicate)")
 
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         intake_data = UpdateIntakeWorkItem(
             status=status,
             snoozed_till=snoozed_till,
@@ -159,7 +163,7 @@ def register_intake_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def delete_intake_work_item(project_id: str, work_item_id: str) -> None:
+    def delete_intake_work_item(project_id: str, work_item_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete an intake work item by work item ID.
 
@@ -169,5 +173,5 @@ def register_intake_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item (use the issue field from
                 IntakeWorkItem response, not the intake work item ID)
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.intake.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
