@@ -63,7 +63,7 @@ def register_project_visibility_tools(mcp: FastMCP) -> None:
     """Register project visibility tools with the MCP server."""
 
     @mcp.tool()
-    def get_project_visibility(project_id: str) -> dict[str, Any]:
+    def get_project_visibility(project_id: str, workspace_slug: str | None = None) -> dict[str, Any]:
         """
         Get a project's visibility (private vs public).
 
@@ -74,11 +74,11 @@ def register_project_visibility_tools(mcp: FastMCP) -> None:
             {id, name, identifier, network, visibility} where network is
             0 (secret/private) or 2 (public) and visibility is the label.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return _send(client, "GET", f"/workspaces/{workspace_slug}/projects/{project_id}/visibility/")
 
     @mcp.tool()
-    def set_project_visibility(project_id: str, visibility: str) -> dict[str, Any]:
+    def set_project_visibility(project_id: str, visibility: str, workspace_slug: str | None = None) -> dict[str, Any]:
         """
         Set a project's visibility to private or public.
 
@@ -96,7 +96,7 @@ def register_project_visibility_tools(mcp: FastMCP) -> None:
         Returns:
             {id, name, identifier, network, visibility} after the change.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         network = _coerce_network(visibility)
         return _send(
             client,
@@ -106,7 +106,9 @@ def register_project_visibility_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def set_projects_visibility_bulk(project_ids: list[str], visibility: str) -> dict[str, Any]:
+    def set_projects_visibility_bulk(
+        project_ids: list[str], visibility: str, workspace_slug: str | None = None
+    ) -> dict[str, Any]:
         """
         Set visibility on many projects in one request.
 
@@ -124,7 +126,7 @@ def register_project_visibility_tools(mcp: FastMCP) -> None:
         Returns:
             {network, visibility, requested, updated, unchanged}.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         network = _coerce_network(visibility)
         return _send(
             client,

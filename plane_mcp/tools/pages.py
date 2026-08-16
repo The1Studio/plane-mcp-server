@@ -16,6 +16,7 @@ def register_page_tools(mcp: FastMCP) -> None:
     def list_pages(
         project_id: str | None = None,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[Page]:
         """
         List pages.
@@ -29,7 +30,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         Returns:
             List of Page objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         if project_id is not None:
             response = client.pages.list_project_pages(
                 workspace_slug=workspace_slug, project_id=project_id, params=params
@@ -43,6 +44,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         page_id: str,
+        workspace_slug: str | None = None,
     ) -> WorkItemPage:
         """
         Link a page to a work item.
@@ -55,7 +57,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         Returns:
             WorkItemPage link object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.work_items.pages.create(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -67,6 +69,7 @@ def register_page_tools(mcp: FastMCP) -> None:
     def list_work_item_pages(
         project_id: str,
         work_item_id: str,
+        workspace_slug: str | None = None,
     ) -> list[WorkItemPage]:
         """
         List all pages linked to a work item.
@@ -78,7 +81,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         Returns:
             List of WorkItemPage link objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         response = client.work_items.pages.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -91,6 +94,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         work_item_page_id: str,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Remove a page link from a work item.
@@ -100,7 +104,7 @@ def register_page_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
             work_item_page_id: UUID of the work item page link (not the page ID)
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.work_items.pages.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -112,6 +116,7 @@ def register_page_tools(mcp: FastMCP) -> None:
     def retrieve_page(
         page_id: str,
         project_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Page:
         """
         Retrieve a page by ID.
@@ -125,7 +130,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         Returns:
             Page object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         if project_id is not None:
             return client.pages.retrieve_project_page(
@@ -151,6 +156,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         logo_props: dict[str, Any] | None = None,
         external_id: str | None = None,
         external_source: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Page:
         """
         Create a page.
@@ -174,7 +180,7 @@ def register_page_tools(mcp: FastMCP) -> None:
         Returns:
             Created Page object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = CreatePage(
             name=name,

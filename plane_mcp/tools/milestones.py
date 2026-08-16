@@ -22,6 +22,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
     def list_milestones(
         project_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[Milestone]:
         """
         List all milestones in a project.
@@ -33,7 +34,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         Returns:
             List of Milestone objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         response: PaginatedMilestoneResponse = client.milestones.list(
             workspace_slug=workspace_slug, project_id=project_id, params=params
         )
@@ -46,6 +47,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         target_date: str | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Milestone:
         """
         Create a new milestone.
@@ -60,7 +62,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         Returns:
             Created Milestone object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = CreateMilestone(
             title=title,
@@ -72,7 +74,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         return client.milestones.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
-    def retrieve_milestone(project_id: str, milestone_id: str) -> Milestone:
+    def retrieve_milestone(project_id: str, milestone_id: str, workspace_slug: str | None = None) -> Milestone:
         """
         Retrieve a milestone by ID.
 
@@ -83,7 +85,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         Returns:
             Milestone object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.milestones.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id
         )
@@ -96,6 +98,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         target_date: str | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Milestone:
         """
         Update a milestone by ID.
@@ -111,7 +114,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         Returns:
             Updated Milestone object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = UpdateMilestone(
             title=title,
@@ -128,7 +131,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def delete_milestone(project_id: str, milestone_id: str) -> None:
+    def delete_milestone(project_id: str, milestone_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete a milestone by ID.
 
@@ -136,7 +139,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             milestone_id: UUID of the milestone
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.milestones.delete(workspace_slug=workspace_slug, project_id=project_id, milestone_id=milestone_id)
 
     @mcp.tool()
@@ -145,6 +148,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         milestone_id: str,
         add_ids: list[str] | None = None,
         remove_ids: list[str] | None = None,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Add or remove work items on a milestone in a single call.
@@ -159,7 +163,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         """
         if not add_ids and not remove_ids:
             raise ValueError("At least one of add_ids or remove_ids must be provided.")
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         if add_ids:
             client.milestones.add_work_items(
                 workspace_slug=workspace_slug,
@@ -180,6 +184,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         project_id: str,
         milestone_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[MilestoneWorkItem]:
         """
         List work items in a milestone.
@@ -192,7 +197,7 @@ def register_milestone_tools(mcp: FastMCP) -> None:
         Returns:
             List of MilestoneWorkItem objects in the milestone
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         response: PaginatedMilestoneWorkItemResponse = client.milestones.list_work_items(
             workspace_slug=workspace_slug,
             project_id=project_id,

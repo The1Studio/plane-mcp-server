@@ -77,6 +77,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
         assignee_ids: list[str] | None = None,
         state_group: list[str] | None = None,
         project_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         Get the per-person workload matrix (summed estimated hours per assignee,
@@ -107,7 +108,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
             rows[{assignee_id, assignee_name, buckets{period: hours}, total}],
             unscheduled[{assignee_id, hours}], meta{...}}.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         params: dict[str, Any] = {
             "granularity": granularity,
@@ -131,6 +132,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def get_issue_workload_estimates_bulk(
         issue_ids: list[str],
+        workspace_slug: str | None = None,
     ) -> dict[str, float]:
         """
         Get time estimates (in hours) for many work items in one request.
@@ -152,13 +154,14 @@ def register_workload_tools(mcp: FastMCP) -> None:
             are ALSO omitted — a parent looks like "no estimate" here; read its
             derived totals via `get_workload_rollups` instead.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         path = f"/workspaces/{workspace_slug}/workload-estimates/"
         return _send(client, "GET", path, params={"issue_ids": ",".join(issue_ids)})
 
     @mcp.tool()
     def get_workload_rollups(
         issue_ids: list[str],
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         Get derived (rolled-up) workload data for PARENT work items — items
@@ -184,7 +187,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
             "due_date": "2026-08-12", "leaf_count": 2}}`. An empty mapping
             means none of the requested items have sub-items.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         path = f"/workspaces/{workspace_slug}/workload-rollups/"
         return _send(client, "GET", path, params={"issue_ids": ",".join(issue_ids)})
 
@@ -192,6 +195,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
     def get_issue_workload_estimate(
         project_id: str,
         work_item_id: str,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         Get the time estimate (in hours) for a work item.
@@ -207,7 +211,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
             percent, due_date, leaf_count}}` — parents never carry their own
             estimate; the rollup is derived from their sub-item tree.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         path = f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/workload-estimate/"
         return _send(client, "GET", path)
 
@@ -216,6 +220,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         hours: float,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         Set (upsert) the time estimate (in hours) for a work item.
@@ -234,7 +239,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
             (see `get_workload_rollups`); set estimates on the sub-items
             instead.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         path = f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/workload-estimate/"
         return _send(client, "PUT", path, json={"hours": hours})
 
@@ -242,6 +247,7 @@ def register_workload_tools(mcp: FastMCP) -> None:
     def delete_issue_workload_estimate(
         project_id: str,
         work_item_id: str,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Delete the time estimate for a work item.
@@ -250,6 +256,6 @@ def register_workload_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project.
             work_item_id: UUID of the work item.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         path = f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/workload-estimate/"
         _send(client, "DELETE", path)

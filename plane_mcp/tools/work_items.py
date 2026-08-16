@@ -54,6 +54,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         fields: str | None = None,
         external_id: str | None = None,
         external_source: str | None = None,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         List work items with optional PQL filtering.
@@ -87,7 +88,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             next_cursor: Cursor for the next page.
             prev_cursor: Cursor for the previous page.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         params = WorkItemQueryParams(
             pql=pql,
@@ -140,6 +141,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         pql: Annotated[str | None, Field(description=PQL_FIELD_HINT)] = None,
         group_by: str | None = None,
         sub_group_by: str | None = None,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         Count work items across the workspace with optional grouping.
@@ -165,7 +167,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 Keys are UUIDs for FK fields, plain strings for priority/state__group,
                 ISO dates for target_date/start_date, "None" for unset values.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         params = WorkItemCountQueryParams(pql=pql, group_by=group_by, sub_group_by=sub_group_by)
         try:
             response: WorkItemGroupedCountResponse = client.work_items.count_workspace(
@@ -205,6 +207,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         state: str | None = None,
         estimate_point: str | None = None,
         type: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItem:
         """
         Create a new work item.
@@ -235,7 +238,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Returns:
             Created WorkItem object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
@@ -272,6 +275,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         external_source: str | None = None,
         order_by: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemDetail:
         """
         Retrieve a work item by ID.
@@ -288,7 +292,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Returns:
             WorkItemDetail object with expanded relationships
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         params = RetrieveQueryParams(
             expand=expand,
@@ -313,6 +317,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         external_source: str | None = None,
         order_by: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemDetail:
         """
         Retrieve a work item by its full identifier (project prefix + sequence number).
@@ -348,7 +353,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 "Expected PROJECT-N format where N is the sequence number."
             )
         project_identifier, sequence_str = parts
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         params = RetrieveQueryParams(
             expand=expand,
@@ -387,6 +392,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         state: str | None = None,
         estimate_point: str | None = None,
         type: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItem:
         """
         Update a work item by ID.
@@ -418,7 +424,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Returns:
             Updated WorkItem object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
@@ -452,7 +458,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool()
-    def delete_work_item(project_id: str, work_item_id: str) -> None:
+    def delete_work_item(project_id: str, work_item_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete a work item by ID.
 
@@ -460,7 +466,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             work_item_id: UUID of the work item
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.work_items.delete(workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id)
 
     @mcp.tool()
@@ -469,6 +475,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         work_item_id: str,
         add_user_id: str | None = None,
         remove_user_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItem:
         """
         Add or remove a single assignee on a work item without replacing the full list.
@@ -486,7 +493,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Returns:
             Updated WorkItem object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
@@ -508,6 +515,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         work_item_id: str,
         add_label_id: str | None = None,
         remove_label_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItem:
         """
         Add or remove a single label on a work item without replacing the full list.
@@ -525,7 +533,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Returns:
             Updated WorkItem object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
@@ -550,6 +558,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         cursor: str | None = None,
         expand: str | None = None,
         fields: str | None = None,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         List archived work items in a project with optional PQL filtering.
@@ -567,7 +576,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Returns:
             Paginated envelope with results, total_count, next_cursor, prev_cursor.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         params = WorkItemQueryParams(
             pql=pql,
             order_by=order_by,
@@ -605,7 +614,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         }
 
     @mcp.tool()
-    def manage_work_item_archive(project_id: str, work_item_id: str, archive: bool) -> None:
+    def manage_work_item_archive(
+        project_id: str, work_item_id: str, archive: bool, workspace_slug: str | None = None
+    ) -> None:
         """
         Archive or unarchive a work item.
 
@@ -617,7 +628,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
             archive: True to archive the work item, False to unarchive it
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         if archive:
             client.work_items.archive(
                 workspace_slug=workspace_slug,
@@ -639,6 +650,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         external_id: str | None = None,
         external_source: str | None = None,
         order_by: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemSearch:
         """
         Search work items by text across a workspace.
@@ -658,7 +670,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Returns:
             WorkItemSearch object containing search results
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         params = RetrieveQueryParams(
             expand=expand,

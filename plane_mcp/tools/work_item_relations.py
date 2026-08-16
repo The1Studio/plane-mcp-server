@@ -20,6 +20,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
     def list_work_item_relations(
         project_id: str,
         work_item_id: str,
+        workspace_slug: str | None = None,
     ) -> WorkItemRelationResponse:
         """
         List relations for a work item.
@@ -39,7 +40,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
             - finish_after: Work items that finish after this item
             - finish_before: Work items that finish before this item
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.work_items.relations.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -52,6 +53,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
         work_item_id: str,
         relation_type: str,
         issues: list[str],
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Create relations for a work item.
@@ -70,12 +72,12 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
                 - "finish_before" — this item finishes before the listed items
             issues: List of work item IDs to create relations with
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Validate relation_type against allowed literal values
         if relation_type not in get_args(WorkItemRelationTypeEnum):
             raise ValueError(
-                f"Invalid relation_type '{relation_type}'. " f"Must be one of: {get_args(WorkItemRelationTypeEnum)}"
+                f"Invalid relation_type '{relation_type}'. Must be one of: {get_args(WorkItemRelationTypeEnum)}"
             )
         validated_relation_type: WorkItemRelationTypeEnum = relation_type  # type: ignore[assignment]
 
@@ -96,6 +98,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         related_issue: str,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Remove a relation from a work item.
@@ -105,7 +108,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
             related_issue: UUID of the related work item to remove relation with
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = RemoveWorkItemRelation(related_issue=related_issue)
 

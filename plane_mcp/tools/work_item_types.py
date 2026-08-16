@@ -20,6 +20,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
     def list_work_item_types(
         project_id: str | None = None,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[WorkItemType]:
         """
         List work item types. Omit project_id for workspace-level types.
@@ -27,11 +28,9 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Each result's `id` is the `work_item_type_id` needed by list_work_item_properties
         to look up custom property and option UUIDs for PQL cf[] filters.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         if project_id:
-            return client.work_item_types.list(
-                workspace_slug=workspace_slug, project_id=project_id, params=params
-            )
+            return client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id, params=params)
         return client.workspace_work_item_types.list(workspace_slug=workspace_slug)
 
     @mcp.tool()
@@ -43,6 +42,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         is_active: bool | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemType:
         """
         Create a new work item type.
@@ -62,7 +62,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Returns:
             Created WorkItemType object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = CreateWorkItemType(
             name=name,
@@ -74,15 +74,14 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         )
 
         if project_id:
-            return client.work_item_types.create(
-                workspace_slug=workspace_slug, project_id=project_id, data=data
-            )
+            return client.work_item_types.create(workspace_slug=workspace_slug, project_id=project_id, data=data)
         return client.workspace_work_item_types.create(workspace_slug=workspace_slug, data=data)
 
     @mcp.tool()
     def import_work_item_types_to_project(
         project_id: str,
         work_item_type_ids: list[str],
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Bulk-link workspace-level work item types to a project.
@@ -97,7 +96,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             work_item_type_ids: List of workspace-level work item type UUIDs to import
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.work_item_types.import_to_project(
             workspace_slug=workspace_slug, project_id=project_id, work_item_type_ids=work_item_type_ids
         )
@@ -106,6 +105,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
     def resolve_work_item_type(
         project_id: str,
         name: str,
+        workspace_slug: str | None = None,
     ) -> WorkItemType:
         """
         Find a work item type by name for a project, create it if missing, and
@@ -134,7 +134,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Returns:
             The WorkItemType. Its `id` is the `type_id` for create_work_item.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         target = name.strip()
 
         workspace_features = client.workspaces.get_features(workspace_slug=workspace_slug)
@@ -142,13 +142,21 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
 
         if workspace_owns_types:
             in_project = next(
-                (t for t in client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id) if (t.name or "").strip() == target),
+                (
+                    t
+                    for t in client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id)
+                    if (t.name or "").strip() == target
+                ),
                 None,
             )
             if in_project is not None:
                 return in_project
             at_workspace = next(
-                (t for t in client.workspace_work_item_types.list(workspace_slug=workspace_slug) if (t.name or "").strip() == target),
+                (
+                    t
+                    for t in client.workspace_work_item_types.list(workspace_slug=workspace_slug)
+                    if (t.name or "").strip() == target
+                ),
                 None,
             )
             if at_workspace is None:
@@ -163,9 +171,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             return at_workspace
 
         # Mode B — types are per-project; enable the feature if needed, then find or create.
-        project_features = client.projects.get_features(
-            workspace_slug=workspace_slug, project_id=project_id
-        )
+        project_features = client.projects.get_features(workspace_slug=workspace_slug, project_id=project_id)
         if not project_features.model_dump().get("work_item_types"):
             client.projects.update_features(
                 workspace_slug=workspace_slug,
@@ -174,7 +180,11 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             )
 
         existing = next(
-            (t for t in client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id) if (t.name or "").strip() == target),
+            (
+                t
+                for t in client.work_item_types.list(workspace_slug=workspace_slug, project_id=project_id)
+                if (t.name or "").strip() == target
+            ),
             None,
         )
         if existing is None:
@@ -189,6 +199,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
     def retrieve_work_item_type(
         work_item_type_id: str,
         project_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemType:
         """
         Retrieve a work item type by ID.
@@ -200,7 +211,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Returns:
             WorkItemType object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         if project_id:
             return client.work_item_types.retrieve(
                 workspace_slug=workspace_slug,
@@ -222,6 +233,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         is_active: bool | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemType:
         """
         Update a work item type by ID.
@@ -239,7 +251,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
         Returns:
             Updated WorkItemType object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = UpdateWorkItemType(
             name=name,
@@ -267,6 +279,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
     def delete_work_item_type(
         work_item_type_id: str,
         project_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Delete a work item type by ID.
@@ -275,7 +288,7 @@ def register_work_item_type_tools(mcp: FastMCP) -> None:
             work_item_type_id: UUID of the work item type
             project_id: UUID of the project. Omit for workspace scope.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         if project_id:
             client.work_item_types.delete(
                 workspace_slug=workspace_slug,

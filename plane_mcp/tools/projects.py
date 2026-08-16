@@ -37,6 +37,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         expand: str | None = None,
         fields: str | None = None,
         order_by: str | None = None,
+        workspace_slug: str | None = None,
     ) -> list[Project]:
         """
         List all projects in a workspace.
@@ -52,7 +53,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             List of Project objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         params = PaginatedQueryParams(
             cursor=cursor,
@@ -90,6 +91,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         external_source: str | None = None,
         external_id: str | None = None,
         is_issue_type_enabled: bool | None = None,
+        workspace_slug: str | None = None,
     ) -> Project:
         """
         Create a new project.
@@ -119,7 +121,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Created Project object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Validate timezone against allowed literal values
         validated_timezone: TimezoneEnum | None = (
@@ -188,7 +190,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         return project
 
     @mcp.tool()
-    def retrieve_project(project_id: str) -> Project:
+    def retrieve_project(project_id: str, workspace_slug: str | None = None) -> Project:
         """
         Retrieve a project by ID.
 
@@ -199,7 +201,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Project object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.projects.retrieve(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
@@ -228,6 +230,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         is_time_tracking_enabled: bool | None = None,
         default_state: str | None = None,
         estimate: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Project:
         """
         Update a project by ID.
@@ -262,7 +265,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Updated Project object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Validate timezone against allowed literal values
         validated_timezone: TimezoneEnum | None = (
@@ -308,7 +311,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         return client.projects.update(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
-    def delete_project(project_id: str) -> None:
+    def delete_project(project_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete a project by ID.
 
@@ -316,11 +319,11 @@ def register_project_tools(mcp: FastMCP) -> None:
             workspace_slug: The workspace slug identifier
             project_id: UUID of the project
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.projects.delete(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def manage_project_archive(project_id: str, archive: bool) -> None:
+    def manage_project_archive(project_id: str, archive: bool, workspace_slug: str | None = None) -> None:
         """
         Archive or unarchive a project.
 
@@ -331,14 +334,14 @@ def register_project_tools(mcp: FastMCP) -> None:
             project_id: UUID of the project
             archive: True to archive the project, False to unarchive it
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         if archive:
             client.projects.archive(workspace_slug=workspace_slug, project_id=project_id)
         else:
             client.projects.unarchive(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def get_project_worklog_summary(project_id: str) -> list[ProjectWorklogSummary]:
+    def get_project_worklog_summary(project_id: str, workspace_slug: str | None = None) -> list[ProjectWorklogSummary]:
         """
         Get work log summary for a project.
 
@@ -349,11 +352,13 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             List of ProjectWorklogSummary objects containing work item IDs and durations
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.projects.get_worklog_summary(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def get_project_members(project_id: str, params: dict[str, Any] | None = None) -> list[UserLite]:
+    def get_project_members(
+        project_id: str, params: dict[str, Any] | None = None, workspace_slug: str | None = None
+    ) -> list[UserLite]:
         """
         Get all members of a project.
 
@@ -365,7 +370,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             List of UserLite objects representing project members
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.projects.get_members(workspace_slug=workspace_slug, project_id=project_id, params=params)
 
     @mcp.tool()
@@ -377,6 +382,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         pages: bool | None = None,
         intakes: bool | None = None,
         work_item_types: bool | None = None,
+        workspace_slug: str | None = None,
     ) -> ProjectFeature:
         """
         Update features of a project.
@@ -394,7 +400,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Updated ProjectFeature object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         data = ProjectFeature(
             modules=modules,
@@ -408,7 +414,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         return client.projects.update_features(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
-    def get_project_estimate(project_id: str) -> Estimate:
+    def get_project_estimate(project_id: str, workspace_slug: str | None = None) -> Estimate:
         """
         Get the estimate configuration for a project.
 
@@ -421,11 +427,13 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Estimate object with id, name, and type fields
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.estimates.retrieve(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def list_project_estimate_points(project_id: str, estimate_id: str) -> list[EstimatePoint]:
+    def list_project_estimate_points(
+        project_id: str, estimate_id: str, workspace_slug: str | None = None
+    ) -> list[EstimatePoint]:
         """
         List all valid estimate points for a project.
 
@@ -447,7 +455,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             List of EstimatePoint objects, each with id and value fields
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.estimates.list_points(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -463,6 +471,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         last_used: bool = True,
         external_id: str | None = None,
         external_source: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Estimate:
         """
         Create a new estimate for a project.
@@ -479,7 +488,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Created Estimate object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         data = CreateEstimate(
             name=name,
             type=type,
@@ -497,6 +506,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         description: str | None = None,
         external_id: str | None = None,
         external_source: str | None = None,
+        workspace_slug: str | None = None,
     ) -> Estimate:
         """
         Update the estimate for a project.
@@ -511,7 +521,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Updated Estimate object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         data = UpdateEstimate(
             name=name,
             description=description,
@@ -521,18 +531,18 @@ def register_project_tools(mcp: FastMCP) -> None:
         return client.estimates.update(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
     @mcp.tool()
-    def delete_project_estimate(project_id: str) -> None:
+    def delete_project_estimate(project_id: str, workspace_slug: str | None = None) -> None:
         """
         Delete the estimate for a project.
 
         Args:
             project_id: UUID of the project
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.estimates.delete(workspace_slug=workspace_slug, project_id=project_id)
 
     @mcp.tool()
-    def link_estimate_to_project(project_id: str, estimate_id: str) -> Project:
+    def link_estimate_to_project(project_id: str, estimate_id: str, workspace_slug: str | None = None) -> Project:
         """
         Link an estimate to a project, making it the active estimate system.
 
@@ -543,7 +553,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Updated Project object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.estimates.link_to_project(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -555,6 +565,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         project_id: str,
         estimate_id: str,
         points: list[dict],
+        workspace_slug: str | None = None,
     ) -> list[EstimatePoint]:
         """
         Create estimate points for a project estimate.
@@ -579,7 +590,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             List of created EstimatePoint objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         data = [CreateEstimatePoint(**p) for p in points]
         return client.estimates.create_points(
             workspace_slug=workspace_slug,
@@ -598,6 +609,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         description: str | None = None,
         external_id: str | None = None,
         external_source: str | None = None,
+        workspace_slug: str | None = None,
     ) -> EstimatePoint:
         """
         Update a single estimate point.
@@ -615,7 +627,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         Returns:
             Updated EstimatePoint object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         data = UpdateEstimatePoint(
             value=value,
             key=key,
@@ -636,6 +648,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         project_id: str,
         estimate_id: str,
         estimate_point_id: str,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Delete a single estimate point.
@@ -645,7 +658,7 @@ def register_project_tools(mcp: FastMCP) -> None:
             estimate_id: UUID of the estimate
             estimate_point_id: UUID of the estimate point to delete
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.estimates.delete_point(
             workspace_slug=workspace_slug,
             project_id=project_id,

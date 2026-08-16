@@ -22,6 +22,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[WorkItemComment]:
         """
         List comments for a work item.
@@ -34,7 +35,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         Returns:
             List of WorkItemComment objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         response: PaginatedWorkItemCommentResponse = client.work_items.comments.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -48,6 +49,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         comment_id: str,
+        workspace_slug: str | None = None,
     ) -> WorkItemComment:
         """
         Retrieve a specific comment for a work item.
@@ -60,7 +62,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         Returns:
             WorkItemComment object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.work_items.comments.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -77,6 +79,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         access: str | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemComment:
         """
         Create a comment for a work item.
@@ -93,7 +96,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         Returns:
             Created WorkItemComment object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Validate access against allowed literal values
         validated_access: AccessEnum | None = (
@@ -125,6 +128,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         access: str | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        workspace_slug: str | None = None,
     ) -> WorkItemComment:
         """
         Update a comment for a work item.
@@ -142,7 +146,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         Returns:
             Updated WorkItemComment object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Validate access against allowed literal values
         validated_access: AccessEnum | None = (
@@ -170,6 +174,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         comment_id: str,
+        workspace_slug: str | None = None,
     ) -> None:
         """
         Delete a comment for a work item.
@@ -179,7 +184,7 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
             comment_id: UUID of the comment
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         client.work_items.comments.delete(
             workspace_slug=workspace_slug,
             project_id=project_id,

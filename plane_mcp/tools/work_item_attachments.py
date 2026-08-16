@@ -88,6 +88,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
     def list_work_item_attachments(
         project_id: str,
         work_item_id: str,
+        workspace_slug: str | None = None,
     ) -> list[dict[str, Any]]:
         """List all attachments for a work item.
 
@@ -102,7 +103,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
             List of attachments, each with: id, name, size, content_type,
             created_at, created_by.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         try:
             attachments = client.work_items.attachments.list(
                 workspace_slug=workspace_slug,
@@ -118,6 +119,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         attachment_id: str,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """Get a presigned download URL for a work item attachment.
 
@@ -135,7 +137,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
         Returns:
             Dict with: download_url (presigned S3 URL), attachment_id, name.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Retrieve endpoint returns raw bytes, not JSON — use list for metadata.
         try:
@@ -176,6 +178,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
         work_item_id: str,
         url: str,
         name: str | None = None,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """Fetch a file from a public URL and attach it to a work item.
 
@@ -229,7 +232,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
         if not content_type or content_type == "application/octet-stream":
             content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
 
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         try:
             attachment = client.work_items.attachments.upload_from_bytes(
                 workspace_slug=workspace_slug,
@@ -249,6 +252,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         attachment_id: str,
+        workspace_slug: str | None = None,
     ) -> None:
         """Delete an attachment from a work item.
 
@@ -259,7 +263,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
             attachment_id: UUID of the attachment to delete
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         try:
             client.work_items.attachments.delete(
                 workspace_slug=workspace_slug,
@@ -275,6 +279,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         attachment_id: str,
+        workspace_slug: str | None = None,
     ) -> Image | str:
         """Fetch an attachment's content so the LLM can read or analyze it.
 
@@ -302,7 +307,7 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
             ValueError: If the file type is unsupported or the file exceeds
                         the size limit for its category.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         # Retrieve endpoint returns raw bytes — use list for name + content_type.
         try:

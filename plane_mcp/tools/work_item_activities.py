@@ -19,6 +19,7 @@ def register_work_item_activity_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         params: dict[str, Any] | None = None,
+        workspace_slug: str | None = None,
     ) -> list[WorkItemActivity]:
         """
         List activities for a work item.
@@ -31,7 +32,7 @@ def register_work_item_activity_tools(mcp: FastMCP) -> None:
         Returns:
             List of WorkItemActivity objects
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         response: PaginatedWorkItemActivityResponse = client.work_items.activities.list(
             workspace_slug=workspace_slug,
             project_id=project_id,
@@ -45,6 +46,7 @@ def register_work_item_activity_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         activity_id: str,
+        workspace_slug: str | None = None,
     ) -> WorkItemActivity:
         """
         Retrieve a specific activity for a work item.
@@ -57,7 +59,7 @@ def register_work_item_activity_tools(mcp: FastMCP) -> None:
         Returns:
             WorkItemActivity object
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
         return client.work_items.activities.retrieve(
             workspace_slug=workspace_slug,
             project_id=project_id,
