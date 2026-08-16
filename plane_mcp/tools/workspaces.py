@@ -13,41 +13,92 @@ from plane_mcp.client import (
 )
 
 
+def _discover_workspaces() -> list[dict] | None:
+    """
+    Ask the server which workspaces the credentials can reach.
+
+    Returns a list of {slug, name, id} on success, or None when the instance
+    does not expose the discovery endpoint (stock Plane predating
+    The1Studio/plane#30) -- the caller then falls back to probing.
+
+    Routed through the SDK's own request helper rather than a hand-built HTTP
+    call so base-URL resolution and API-key auth stay in one place; `get_me`
+    reaches /users/me the same way. Crucially this needs NO workspace, which is
+    the entire point: discovery has to work on a server configured with no slug.
+    """
+    client, _ = get_plane_client_context(require_workspace=False)
+    try:
+        response = client.users._get("me/workspaces")
+    except Exception:  # noqa: BLE001 - absent endpoint or unreachable host
+        return None
+
+    if not isinstance(response, list):
+        return None
+
+    entries: list[dict] = []
+    for item in response:
+        if not isinstance(item, dict):
+            continue
+        slug = item.get("slug")
+        if slug:
+            entries.append({"slug": slug, "name": item.get("name"), "id": item.get("id")})
+    return entries
+
+
 def register_workspace_tools(mcp: FastMCP) -> None:
     """Register all workspace-related tools with the MCP server."""
 
     @mcp.tool()
     def list_workspaces(candidates: list[str] | None = None) -> dict:
         """
-        Report which workspaces this server can actually reach, probing both the
-        configured slugs and any candidate slugs you supply.
+        List the workspaces these credentials can reach.
 
-        NOTE ON DISCOVERY: Plane's public API exposes no workspace-listing
-        endpoint -- /api/v1/workspaces/ does not exist, and the web app's
-        /api/users/me/workspaces/ rejects API keys (it needs a browser session).
-        So this CANNOT enumerate the workspaces your account belongs to. It
-        probes a set of slugs you name. A workspace missing from the result is
-        missing from that set, not necessarily from your account.
+        Prefers real discovery: GET /api/v1/users/me/workspaces/ returns every
+        workspace the account is an active member of. When the server exposes
+        it, you get the complete list and need supply nothing.
 
-        FINDING YOUR SLUG: it is the first path segment when you are logged into
-        Plane -- <base-url>/<slug>/projects/. Read it from the browser address
-        bar, then pass it here as a candidate to confirm before committing it to
-        config.
+        FALLBACK: a Plane instance without that endpoint (stock, predating
+        The1Studio/plane#30) cannot enumerate workspaces at all -- no public
+        route lists them, and the web app's internal one rejects API keys. There
+        this degrades to PROBING the configured slugs plus any candidates you
+        name, and a workspace missing from the result is missing from that set,
+        not necessarily from your account. `discovery` in the result says which
+        mode ran, so an empty list is never mistaken for "you have none".
 
-        UNREACHABLE IS AMBIGUOUS: Plane answers a wrong slug and a real slug you
-        lack access to with the same 403, so `reachable: false` means "this slug
-        did not work", never "this workspace does not exist".
+        FINDING YOUR SLUG when probing: it is the first path segment when you
+        are logged into Plane -- <base-url>/<slug>/projects/.
+
+        UNREACHABLE IS AMBIGUOUS when probing: Plane answers a wrong slug and a
+        real slug you lack access to with the same 403, so `reachable: false`
+        means "this slug did not work", never "this workspace does not exist".
 
         Args:
-            candidates: Extra slugs to probe alongside the configured ones. Use
-                this to test a slug without restarting the server.
+            candidates: Extra slugs to probe. Only used in fallback mode --
+                discovery needs no hints.
 
         Returns:
-            dict with `active` (session default), `default` (env default),
-            `workspaces` (one entry per probed slug carrying `slug`, `source`,
-            `reachable`, and either `project_count` or `error`), and `note` when
+            dict with `discovery` ("api" or "probe"), `active` (session
+            default), `default` (env default), `workspaces`, and `note` when
             there was nothing to probe.
         """
+        discovered = _discover_workspaces()
+        if discovered is not None:
+            return {
+                "discovery": "api",
+                "active": get_active_workspace(),
+                "default": (get_configured_workspace_slugs() or [None])[0],
+                "workspaces": [{**w, "source": "discovered", "reachable": True} for w in discovered],
+                "note": (
+                    "Complete list of workspaces this account is an active member of. "
+                    "Pass a slug to set_workspace() to make it the session default."
+                )
+                if discovered
+                else (
+                    "The server reports this account is an active member of no workspaces. "
+                    "This is a real answer from the API, not a failed probe."
+                ),
+            }
+
         configured = get_configured_workspace_slugs()
         extra = [s.strip() for s in (candidates or []) if s and s.strip()]
 
@@ -69,6 +120,7 @@ def register_workspace_tools(mcp: FastMCP) -> None:
                 entries.append({"slug": slug, "source": source, "reachable": False, "error": str(exc)})
 
         result = {
+            "discovery": "probe",
             "active": get_active_workspace(),
             "default": configured[0] if configured else None,
             "configured_count": len(configured),

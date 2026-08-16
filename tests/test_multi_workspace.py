@@ -143,3 +143,92 @@ class TestSlugLessServer:
     def test_session_default_satisfies_the_requirement(self):
         set_active_workspace("unity")
         assert get_plane_client_context().workspace_slug == "unity"
+
+
+class TestWorkspaceDiscovery:
+    """`list_workspaces` prefers real discovery, degrades to probing.
+
+    The fallback is the whole reason this is not a one-liner: a stock Plane has
+    no endpoint that lists workspaces, so an empty result there means "nothing
+    probed", while an empty result under discovery means "you are in none".
+    Conflating those is the bug -- hence `discovery` in the payload.
+    """
+
+    def test_returns_none_when_endpoint_is_absent(self, monkeypatch):
+        from plane_mcp.tools import workspaces as ws
+
+        class _Users:
+            def _get(self, _endpoint):
+                raise RuntimeError("404 Not Found")
+
+        monkeypatch.setattr(
+            ws,
+            "get_plane_client_context",
+            lambda **_: (type("C", (), {"users": _Users()})(), ""),
+        )
+        assert ws._discover_workspaces() is None
+
+    def test_parses_discovered_entries(self, monkeypatch):
+        from plane_mcp.tools import workspaces as ws
+
+        class _Users:
+            def _get(self, _endpoint):
+                return [
+                    {"slug": "unity", "name": "Unity", "id": "1"},
+                    {"slug": "cocos", "name": "Cocos", "id": "2"},
+                ]
+
+        monkeypatch.setattr(
+            ws,
+            "get_plane_client_context",
+            lambda **_: (type("C", (), {"users": _Users()})(), ""),
+        )
+        got = ws._discover_workspaces()
+        assert [w["slug"] for w in got] == ["unity", "cocos"]
+
+    def test_discovery_needs_no_workspace(self, monkeypatch):
+        """Discovery must run on a server configured with NO slug -- the point."""
+        from plane_mcp.tools import workspaces as ws
+
+        seen = {}
+
+        class _Users:
+            def _get(self, _endpoint):
+                return []
+
+        def _ctx(**kwargs):
+            seen.update(kwargs)
+            return (type("C", (), {"users": _Users()})(), "")
+
+        monkeypatch.setattr(ws, "get_plane_client_context", _ctx)
+        ws._discover_workspaces()
+        assert seen.get("require_workspace") is False
+
+    def test_malformed_payload_falls_back_rather_than_crashing(self, monkeypatch):
+        from plane_mcp.tools import workspaces as ws
+
+        class _Users:
+            def _get(self, _endpoint):
+                return {"unexpected": "shape"}
+
+        monkeypatch.setattr(
+            ws,
+            "get_plane_client_context",
+            lambda **_: (type("C", (), {"users": _Users()})(), ""),
+        )
+        assert ws._discover_workspaces() is None
+
+    def test_entries_without_a_slug_are_skipped(self, monkeypatch):
+        """A slug-less entry is useless downstream -- every route needs one."""
+        from plane_mcp.tools import workspaces as ws
+
+        class _Users:
+            def _get(self, _endpoint):
+                return [{"name": "No Slug"}, {"slug": "ok", "name": "Ok"}]
+
+        monkeypatch.setattr(
+            ws,
+            "get_plane_client_context",
+            lambda **_: (type("C", (), {"users": _Users()})(), ""),
+        )
+        assert [w["slug"] for w in ws._discover_workspaces()] == ["ok"]
