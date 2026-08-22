@@ -14,6 +14,7 @@ from plane_mcp.tools.project_visibility import register_project_visibility_tools
 from plane_mcp.tools.projects import register_project_tools
 from plane_mcp.tools.states import register_state_tools
 from plane_mcp.tools.users import register_user_tools
+from plane_mcp.tools.views_ext import register_views_ext_tools
 from plane_mcp.tools.work_item_activities import register_work_item_activity_tools
 from plane_mcp.tools.work_item_attachments import register_work_item_attachment_tools
 from plane_mcp.tools.work_item_comments import register_work_item_comment_tools
@@ -52,3 +53,4 @@ def register_tools(mcp: FastMCP) -> None:
     register_pql_tools(mcp)
     register_workload_tools(mcp)
     register_project_visibility_tools(mcp)
+    register_views_ext_tools(mcp)
