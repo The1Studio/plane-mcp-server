@@ -280,3 +280,71 @@ def register_workload_tools(mcp: FastMCP) -> None:
         client, workspace_slug = get_plane_client_context(workspace_slug)
         path = f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/workload-estimate/"
         _send(client, "DELETE", path)
+
+    @mcp.tool()
+    def get_work_settings(workspace_slug: str | None = None) -> dict[str, Any]:
+        """
+        Get the workspace-wide workload settings (max daily hours cap, workdays,
+        and week-start day) that `get_workload`'s capacity/overload columns are
+        computed against.
+
+        Callable by any workspace ADMIN or MEMBER (not GUEST).
+
+        Returns:
+            `{max_daily_hours: float, workdays: list[int] (0=Sun..6=Sat, ascending,
+            never empty), week_start_day: int (0=Sun..6=Sat)}`. Always returns a
+            value — a workspace with no settings row yet gets the server default
+            (`max_daily_hours=8.0, workdays=[1,2,3,4,5]` i.e. Mon-Fri,
+            `week_start_day=1` i.e. Monday); callers never need to branch on
+            "not configured".
+        """
+        client, workspace_slug = get_plane_client_context(workspace_slug)
+        path = f"/workspaces/{workspace_slug}/work-settings/"
+        return _send(client, "GET", path)
+
+    @mcp.tool()
+    def set_work_settings(
+        max_daily_hours: float,
+        workdays: list[int],
+        week_start_day: int,
+        workspace_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Set (upsert) the workspace-wide workload settings.
+
+        Callable by a workspace ADMIN only.
+
+        Args:
+            max_daily_hours: Per-day hour cap (>= 0, <= 10000). Quantized to 2
+                decimals. This is a PER-DAY cap, not per-week — there is no
+                weekly-hours field; a workspace's effective weekly capacity is
+                `max_daily_hours * len(workdays)`.
+            workdays: Which days count as working days, Plane's weekday
+                encoding (0=Sun..6=Sat). Must be non-empty — an empty list is
+                rejected with a 400 (it would make weekly-capacity division by
+                zero). Duplicates are rejected; the server normalizes the
+                stored value to ascending order regardless of input order.
+            week_start_day: First day of the week for bucketing, same 0=Sun..6=Sat
+                encoding (0..6).
+
+        Returns:
+            The updated settings object, same shape as `get_work_settings`.
+
+        Raises:
+            A 400 response (surfaced as `httpx.HTTPStatusError` with the
+            server's error detail) for an empty `workdays`, an out-of-range
+            `week_start_day`/`workdays` entry, or `max_daily_hours` outside
+            `[0, 10000]`.
+        """
+        client, workspace_slug = get_plane_client_context(workspace_slug)
+        path = f"/workspaces/{workspace_slug}/work-settings/"
+        return _send(
+            client,
+            "PUT",
+            path,
+            json={
+                "max_daily_hours": max_daily_hours,
+                "workdays": workdays,
+                "week_start_day": week_start_day,
+            },
+        )
