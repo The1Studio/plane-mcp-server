@@ -347,6 +347,17 @@ now rejects `network` outright and points here instead.
 | `get_features` | Get feature flags (workspace, or a project's if `project_id` given) |
 | `update_workspace_features` | Update features of the current workspace |
 
+### Workspace Views
+
+| Tool Name | Description |
+|-----------|-------------|
+| `list_workspace_view_issues` | List work items across the workspace, grouped and paginated, with server-side `search` ‡ |
+
+‡ Requires the The1Studio fork's `views_ext` app on the server (404 against
+upstream Plane / Plane Cloud). It backs the workspace Views tab's layout
+switcher (List / Board / Calendar / Spreadsheet / Timeline). Note that an empty
+or absent `search` returns everything — it is never a hidden filter.
+
 ### Users
 
 | Tool Name | Description |
