@@ -2,6 +2,7 @@
 
 from fastmcp import FastMCP
 
+from plane_mcp.tools.cascade_ext import register_cascade_ext_tools
 from plane_mcp.tools.cycles import register_cycle_tools
 from plane_mcp.tools.initiatives import register_initiative_tools
 from plane_mcp.tools.intake import register_intake_tools
@@ -54,3 +55,4 @@ def register_tools(mcp: FastMCP) -> None:
     register_workload_tools(mcp)
     register_project_visibility_tools(mcp)
     register_views_ext_tools(mcp)
+    register_cascade_ext_tools(mcp)

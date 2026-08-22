@@ -20,6 +20,8 @@ from plane.models.work_items import (
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.tools.cascade_ext import TERMINAL_GROUPS
+from plane_mcp.tools.cascade_ext import _send as _cascade_send
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
@@ -392,8 +394,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         state: str | None = None,
         estimate_point: str | None = None,
         type: str | None = None,
+        cascade: bool = False,
         workspace_slug: str | None = None,
-    ) -> WorkItem:
+    ) -> WorkItem | dict[str, Any]:
         """
         Update a work item by ID.
 
@@ -420,15 +423,46 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             state: UUID of the state
             estimate_point: Estimate point value
             type: Work item type identifier
+            cascade: Default False. When False (or when `state` is not set in
+                this call), this is a plain PATCH — identical to calling this
+                tool without `cascade` at all, and a plain `state` change on
+                its own NEVER cascades to sub-items regardless of history.
+                When True AND `state` names a state whose group is terminal
+                ("completed"/"cancelled"), the parent's new state and every
+                currently-eligible descendant are applied together via the
+                fork's cascade-apply endpoint (The1Studio/plane#54) instead
+                of a plain state PATCH — mirroring the web UI's cascade
+                confirmation modal. When True but the target state is NOT
+                terminal, this is also a plain PATCH; the flag never raises,
+                so a caller may set it once and reuse it across calls. Use
+                `preview_work_item_cascade` first to see what would cascade.
+                Requires the fork's `cascade_ext` app on the server.
 
         Returns:
-            Updated WorkItem object
+            Updated WorkItem object — unless the cascade path fires, in which
+            case any OTHER fields set in this call are applied first via a
+            plain PATCH (state excluded), then the cascade-apply response is
+            returned instead: {"parent": "<uuid>", "updated": ["<uuid>", ...],
+            "rejected": [{"id", "reason"}, ...]}. Call retrieve_work_item
+            afterward for the full parent object.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
         validated_priority: PriorityEnum | None = (
             priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
         )
+
+        # Determine whether this call must cascade: only possible when the
+        # caller is actually changing `state` in this same call — reusing a
+        # stale `cascade=True` across unrelated calls must never surprise-
+        # cascade a state set earlier. Terminality is read from the state's
+        # `group`, NEVER its name (names are per-project and renameable).
+        cascading = False
+        if cascade and state is not None:
+            target_state = client.states.retrieve(
+                workspace_slug=workspace_slug, project_id=project_id, state_id=state
+            )
+            cascading = target_state.group in TERMINAL_GROUPS
 
         data = UpdateWorkItem(
             name=name,
@@ -445,10 +479,29 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_source=external_source,
             external_id=external_id,
             parent=parent,
-            state=state,
+            # Cascading moves `state` via cascade-apply below, not this PATCH.
+            state=None if cascading else state,
             estimate_point=estimate_point,
             type=type,
         )
+
+        if cascading:
+            # Any other field set alongside state+cascade still needs to land
+            # — cascade-apply only ever touches `state`, so it must not
+            # silently swallow a caller's other requested changes.
+            if data.model_dump(exclude_none=True):
+                client.work_items.update(
+                    workspace_slug=workspace_slug,
+                    project_id=project_id,
+                    work_item_id=work_item_id,
+                    data=data,
+                )
+            return _cascade_send(
+                client,
+                "POST",
+                f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/cascade-apply/",
+                json={"state_id": state, "child_ids": None},
+            )
 
         return client.work_items.update(
             workspace_slug=workspace_slug,
