@@ -12,4 +12,13 @@ items always belong to a project; ask which if one is not named.
    delete_work_item by work item id (set parent=<work item id> to nest).
 5. List an epic's children: list_work_items(project_id, pql='childOf("<EPIC-IDENTIFIER>")')
    using the epic's human-readable identifier (e.g. "PROJ-12") from retrieve_work_item.
+
+## GitHub status-automation config (get_github_state_config / set_github_state_config)
+
+Three tiers, most-specific-wins: built-in defaults -> instance-wide "global" ->
+workspace -> project. get_github_state_config ALWAYS returns the fully RESOLVED
+rules at the tier you ask for, not just that tier's stored override — a
+project-tier read already has global + workspace + project merged in. Only
+set_github_state_config writes a single tier; write the lowest tier that
+actually needs to change instead of repeating rules already correct below it.
 """
