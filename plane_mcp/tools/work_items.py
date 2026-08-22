@@ -19,10 +19,12 @@ from plane.models.work_items import (
 )
 from pydantic import Field
 
+from plane_mcp.clearing import build_clear_payload
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.tools.cascade_ext import TERMINAL_GROUPS
 from plane_mcp.tools.cascade_ext import _send as _cascade_send
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
+from plane_mcp.tools.workload import _send as _api_send
 
 logger = get_logger(__name__)
 
@@ -395,6 +397,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         estimate_point: str | None = None,
         type: str | None = None,
         cascade: bool = False,
+        clear: list[str] | None = None,
         workspace_slug: str | None = None,
     ) -> WorkItem | dict[str, Any]:
         """
@@ -437,6 +440,12 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 so a caller may set it once and reuse it across calls. Use
                 `preview_work_item_cascade` first to see what would cascade.
                 Requires the fork's `cascade_ext` app on the server.
+            clear: Field names to explicitly null out, e.g.
+                `clear=["target_date", "parent"]`. Passing `target_date=None`
+                does NOT clear it — the SDK drops None-valued keys before the
+                PATCH is sent, so the call would return 200 having changed
+                nothing. Use this instead. A field may be given a value or
+                listed here, never both.
 
         Returns:
             Updated WorkItem object — unless the cascade path fires, in which
@@ -485,17 +494,34 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             type=type,
         )
 
+        def _apply() -> WorkItem:
+            if clear:
+                # Raw PATCH: the SDK's `model_dump(exclude_none=True)` would
+                # strip every null we just asked for, turning this into a
+                # silent no-op. See plane-mcp-server#21.
+                return WorkItem.model_validate(
+                    _api_send(
+                        client,
+                        "PATCH",
+                        f"/workspaces/{workspace_slug}/projects/{project_id}/issues/{work_item_id}/",
+                        json=build_clear_payload(data, clear, "update_work_item"),
+                    )
+                )
+            return client.work_items.update(
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=work_item_id,
+                data=data,
+            )
+
         if cascading:
             # Any other field set alongside state+cascade still needs to land
             # — cascade-apply only ever touches `state`, so it must not
-            # silently swallow a caller's other requested changes.
-            if data.model_dump(exclude_none=True):
-                client.work_items.update(
-                    workspace_slug=workspace_slug,
-                    project_id=project_id,
-                    work_item_id=work_item_id,
-                    data=data,
-                )
+            # silently swallow a caller's other requested changes. A `clear`
+            # alongside a cascade is such a change and must land too, which is
+            # why the emptiness check below considers it.
+            if clear or data.model_dump(exclude_none=True):
+                _apply()
             return _cascade_send(
                 client,
                 "POST",
@@ -503,12 +529,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 json={"state_id": state, "child_ids": None},
             )
 
-        return client.work_items.update(
-            workspace_slug=workspace_slug,
-            project_id=project_id,
-            work_item_id=work_item_id,
-            data=data,
-        )
+        return _apply()
 
     @mcp.tool()
     def delete_work_item(project_id: str, work_item_id: str, workspace_slug: str | None = None) -> None:
