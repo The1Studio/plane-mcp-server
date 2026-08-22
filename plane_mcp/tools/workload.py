@@ -92,8 +92,9 @@ def register_workload_tools(mcp: FastMCP) -> None:
                 with the caller's accessible projects).
             assignee_ids: Optional list of assignee UUIDs to filter rows by.
             state_group: Optional list of state groups to include
-                (backlog, unstarted, started, completed, cancelled). Default
-                excludes completed + cancelled.
+                (backlog, unstarted, started, completed, cancelled). No
+                default filter — when omitted, every state group is
+                returned, including completed and cancelled.
 
         Note:
             The matrix counts LEAF work items only — a parent (an item with
@@ -104,9 +105,29 @@ def register_workload_tools(mcp: FastMCP) -> None:
                 project-scoped workload route instead of the workspace route.
 
         Returns:
-            Workload response: {granularity, date_from, date_to, periods[],
-            rows[{assignee_id, assignee_name, buckets{period: hours}, total}],
+            Workload response: {granularity, date_from, date_to, periods[]
+            (spans the whole requested window, not just the periods that
+            received hours — capacity_buckets/total_over below are priced
+            against every period in this list), rows[...],
             unscheduled[{assignee_id, hours}], meta{...}}.
+
+            Each entry in rows[] is {assignee_id (null = the Unassigned
+            row), assignee_name, buckets{period: hours} (sparse),
+            month_buckets{"YYYY-MM": hours} (sparse calendar-month totals,
+            independent of `granularity`), total, capacity_buckets
+            {period: hours}, over{period: bool}, total_over (bool — `total`
+            exceeds the summed capacity_buckets across the WHOLE window),
+            tasks[] (per-issue detail, capped at 200/assignee),
+            tasks_truncated (bool — true when that cap was hit)}.
+
+            Each entry in tasks[] is {id, project_id, identifier, name,
+            hours (this assignee's share of the issue's estimate),
+            total_hours (the issue's undivided estimate), assignee_count,
+            start_date, target_date, state_group, overdue}.
+
+            rows[] is ordered Unassigned first, then ascending by
+            assignee_name (case-insensitive) — rows[0] is NOT the busiest
+            assignee.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
