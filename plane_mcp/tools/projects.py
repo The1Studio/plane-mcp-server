@@ -24,6 +24,7 @@ from plane.models.projects import (
 from plane.models.query_params import PaginatedQueryParams
 from plane.models.users import UserLite
 
+from plane_mcp.clearing import build_clear_payload
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.tools.workload import _send
 
@@ -286,6 +287,7 @@ def register_project_tools(mcp: FastMCP) -> None:
         is_time_tracking_enabled: bool | None = None,
         default_state: str | None = None,
         estimate: str | None = None,
+        clear: list[str] | None = None,
         workspace_slug: str | None = None,
     ) -> Project:
         """
@@ -317,6 +319,12 @@ def register_project_tools(mcp: FastMCP) -> None:
             is_time_tracking_enabled: Enable time tracking
             default_state: UUID of the default state
             estimate: Estimate configuration
+            clear: Field names to explicitly null out, e.g.
+                `clear=["default_assignee"]`. Passing `default_assignee=None`
+                does NOT clear it — the SDK drops None-valued keys before the
+                PATCH is sent, so the call would return 200 having changed
+                nothing. Use this instead. A field may be given a value or
+                listed here, never both.
 
         Returns:
             Updated Project object
@@ -363,6 +371,17 @@ def register_project_tools(mcp: FastMCP) -> None:
             default_state=default_state,
             estimate=estimate,
         )
+
+        if clear:
+            # Raw PATCH: the SDK's `model_dump(exclude_none=True)` would strip
+            # every null we just asked for, turning this into a silent no-op.
+            response = _send(
+                client,
+                "PATCH",
+                f"/workspaces/{workspace_slug}/projects/{project_id}/",
+                json=build_clear_payload(data, clear, "update_project"),
+            )
+            return Project.model_validate(response)
 
         return client.projects.update(workspace_slug=workspace_slug, project_id=project_id, data=data)
 
