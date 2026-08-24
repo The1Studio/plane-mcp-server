@@ -729,6 +729,17 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         Search work items by text across a workspace.
 
+        Matches on work item name, whole-integer sequence_id, and project
+        identifier (all icontains). Despite the endpoint's "semantic search"
+        description it is a plain substring match, so a paraphrase finds
+        nothing that the literal words would not.
+
+        Capped at the endpoint's default of **10 results**, which this tool
+        cannot currently raise. Ten hits therefore means "at least ten", never
+        "exactly ten" — do not read a short result set as evidence that
+        nothing else matches, and reach for `list_work_items` with a PQL
+        expression when you need the complete set.
+
         Use this for free-text name/description search. For structured
         filtering (priority, state, assignee, dates, etc.) use
         `list_work_items` with a PQL expression.
