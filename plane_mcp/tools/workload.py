@@ -128,6 +128,40 @@ def register_workload_tools(mcp: FastMCP) -> None:
             rows[] is ordered Unassigned first, then ascending by
             assignee_name (case-insensitive) — rows[0] is NOT the busiest
             assignee.
+
+            rows[] COUNTS PEOPLE, NOT WORK. Every active, non-bot member of
+            the in-scope projects gets a row whether or not they carry any
+            estimated work, so `len(rows)` is a headcount and answers nothing
+            about whether this window holds anything. A workspace with 30
+            members and nothing scheduled returns 30 rows. To ask "is there
+            work here", test the rows themselves:
+
+                any(r["tasks"] or r["total"] for r in resp["rows"])
+
+            Both halves are needed: `total` alone misses a member whose only
+            work is unscheduled (those hours go to the top-level
+            `unscheduled[]` bucket, never into `buckets`), and `tasks` alone
+            misses hours whose task rows were cut by the 200/assignee cap.
+
+            An empty row is not a gap in the data — it carries total: 0,
+            tasks: [], and a FULLY POPULATED capacity_buckets. The unused
+            capacity is the point of the row: it is how the response answers
+            "who is free" as well as "who is overloaded".
+
+            A member with no assigned work item and one whose work items are
+            all unestimated are DELIBERATELY indistinguishable here; both are
+            simply "no estimated work".
+
+            Membership is ProjectMember, never WorkspaceMember — someone with
+            no in-scope project could never be assigned work this request
+            returns, so they get no row. A flag-off guest
+            (guest_view_all_features=False) sees only their OWN row in a
+            restricted project: that project's member roster is exactly what
+            the flag withholds. `assignee_ids` narrows empty rows too, so
+            filtering to one member returns one row.
+
+            This is unconditional — there is no parameter to switch empty
+            rows off.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
