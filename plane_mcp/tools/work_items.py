@@ -29,6 +29,30 @@ from plane_mcp.tools.workload import _send as _api_send
 logger = get_logger(__name__)
 
 
+def _relation_ids(items: Any) -> list[str]:
+    """UUIDs from a relation list that may arrive in either shape.
+
+    `WorkItemDetail.assignees` and `.labels` are typed `list[str] | list[UserLite]`
+    / `list[str] | list[Label]` (plane-sdk >= 0.2.20), because the API returns bare
+    UUID strings unless the request asked for `?expand=`. Both shapes reach the
+    read-modify-write tools below, which retrieve without an expand and therefore
+    see strings in practice.
+
+    Reading `.id` off the string form raises AttributeError. The dangerous variant
+    is not the crash but what a lenient version would do: these tools rewrite the
+    WHOLE relation list from what they read, so an empty or partial read silently
+    DROPS every existing assignee or label instead of adding one. Hence a helper
+    that handles both shapes rather than a `getattr(x, "id", None)` at each site.
+    """
+    out: list[str] = []
+    for item in items or []:
+        value = item if isinstance(item, str) else getattr(item, "id", None)
+        if value:
+            out.append(value)
+    return out
+
+
+
 def _resolve_description_html(description_html: str | None, description_stripped: str | None) -> str | None:
     """Resolve the description_html to persist.
 
@@ -571,7 +595,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
-        ids = [u.id for u in (current.assignees or []) if u.id]
+        ids = _relation_ids(current.assignees)
         if remove_user_id:
             ids = [uid for uid in ids if uid != remove_user_id]
         if add_user_id and add_user_id not in ids:
@@ -611,7 +635,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         current = client.work_items.retrieve(
             workspace_slug=workspace_slug, project_id=project_id, work_item_id=work_item_id
         )
-        ids = [lb.id for lb in (current.labels or []) if lb.id]
+        ids = _relation_ids(current.labels)
         if remove_label_id:
             ids = [lid for lid in ids if lid != remove_label_id]
         if add_label_id and add_label_id not in ids:
