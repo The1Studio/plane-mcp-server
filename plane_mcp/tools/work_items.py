@@ -243,7 +243,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         Args:
             project_id: UUID of the project
             name: Work item name (required)
-            assignees: List of user IDs to assign to the work item
+            assignees: List of user IDs to assign to the work item. OMITTING this
+                assigns the work item to the CALLER (see "Creation defaults" below);
+                pass an empty list to create it deliberately unassigned.
             labels: List of label IDs to attach to the work item
             type_id: UUID of the work item type
             point: Story point value
@@ -253,7 +255,10 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 description_stripped server-side). Ignored if description_html is set.
             priority: Priority level (urgent, high, medium, low, none)
             start_date: Start date (ISO 8601 format)
-            target_date: Target/end date (ISO 8601 format)
+            target_date: Target/end date (ISO 8601 format). OMITTING this sets it to
+                TODAY (see "Creation defaults" below). Passing None does NOT mean "no
+                due date" — the SDK drops None-valued keys before the request, so it is
+                indistinguishable from omitting the argument and you get today either way.
             sort_order: Sort order value
             is_draft: Whether the work item is a draft
             external_source: External system source name
@@ -262,6 +267,28 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             state: UUID of the state
             estimate_point: Estimate point value
             type: Work item type identifier
+
+        Creation defaults (The1Studio fork):
+            The server fills two fields when the request does not carry them:
+
+            * no ``assignees`` key -> assigned to the caller. The project's own
+              ``default_assignee`` still takes precedence, and a caller who is not an
+              active project member at role >= 15 is skipped, leaving the item
+              unassigned rather than assigning someone who cannot see it.
+            * no ``target_date`` key -> today, in the CALLER's own ``user_timezone``,
+              not the server's UTC date. When ``start_date`` is in the future the
+              default is ``start_date`` instead, so a future start date can never
+              produce "Start date cannot exceed target date".
+
+            An ABSENT field and an EXPLICITLY EMPTY one are different. ``assignees=[]``
+            means "deliberately nobody" and is honoured. ``target_date`` has no such
+            escape hatch through this tool, because None is dropped before the request
+            and reads as absent — to get a work item with no due date, create it and
+            then ``update_work_item(..., clear=["target_date"])``.
+
+            Updates never default: clearing either field leaves it cleared.
+            ``create_intake_work_item`` is excluded server-side and gets neither
+            default; that asymmetry is deliberate.
 
         Returns:
             Created WorkItem object
