@@ -111,6 +111,14 @@ def register_workload_tools(mcp: FastMCP) -> None:
             against every period in this list), rows[...],
             unscheduled[{assignee_id, hours}], meta{...}}.
 
+            meta carries issues_counted, issues_unscheduled,
+            issues_unestimated, dirty_date_count, zero_estimate_count,
+            unscheduled_ratio and truncated. issues_counted and
+            issues_unscheduled describe HOURS, so they count estimated items
+            only; issues_unestimated counts the rest, and is a superset of
+            zero_estimate_count (which sees only stored rows with
+            hours <= 0, not items with no row at all).
+
             Each entry in rows[] is {assignee_id (null = the Unassigned
             row), assignee_name, buckets{period: hours} (sparse),
             month_buckets{"YYYY-MM": hours} (sparse calendar-month totals,
@@ -124,7 +132,26 @@ def register_workload_tools(mcp: FastMCP) -> None:
             hours (this assignee's share of the issue's estimate),
             total_hours (the issue's undivided estimate), assignee_count,
             start_date, target_date, state_group, state_name, state_color,
-            overdue}.
+            unestimated, overdue}.
+
+            unestimated is True when the work item has NO estimate row, or
+            one with hours <= 0. Such an item carries hours: 0 and
+            total_hours: 0, and contributes to NO capacity figure at all —
+            buckets, month_buckets, capacity_buckets, over, total_over and
+            the top-level unscheduled[] are identical to a response without
+            it. It is a task row and nothing else.
+
+            DO NOT infer this from hours == 0. A stored zero-hour estimate is
+            a real, reachable state (the server reports those separately in
+            meta.zero_estimate_count), so the arithmetic test misclassifies
+            it. The flag is always present and never null; an estimated row
+            carries False explicitly.
+
+            Two consequences worth planning around: tasks[] is sorted with
+            unestimated rows FIRST, and the 200/assignee cap is SHARED
+            between the two kinds, so an assignee with a large unestimated
+            backlog can have estimated rows truncated away (tasks_truncated
+            reports it). Do not assume tasks[0] is the earliest-dated row.
 
             state_color is the state's own colour and is a FREE-FORM CSS
             colour string, not a guaranteed hex: server-side it is an
@@ -157,8 +184,12 @@ def register_workload_tools(mcp: FastMCP) -> None:
             "who is free" as well as "who is overloaded".
 
             A member with no assigned work item and one whose work items are
-            all unestimated are DELIBERATELY indistinguishable here; both are
-            simply "no estimated work".
+            all unestimated are NO LONGER indistinguishable: since the server
+            started returning unestimated items, the latter has a non-empty
+            tasks[] whose rows all carry unestimated: True, while the former
+            has tasks: []. Both still report total: 0, so a check written
+            against `total` alone cannot tell them apart. meta
+            .issues_unestimated gives the workspace-wide count.
 
             Membership is ProjectMember, never WorkspaceMember — someone with
             no in-scope project could never be assigned work this request
