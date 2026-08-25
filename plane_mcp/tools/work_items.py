@@ -21,6 +21,7 @@ from pydantic import Field
 
 from plane_mcp.clearing import build_clear_payload
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.pql_support import guard_pql
 from plane_mcp.tools.cascade_ext import TERMINAL_GROUPS
 from plane_mcp.tools.cascade_ext import _send as _cascade_send
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
@@ -50,7 +51,6 @@ def _relation_ids(items: Any) -> list[str]:
         if value:
             out.append(value)
     return out
-
 
 
 def _resolve_description_html(description_html: str | None, description_stripped: str | None) -> str | None:
@@ -117,6 +117,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             prev_cursor: Cursor for the previous page.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
+        pql_error = guard_pql(client, workspace_slug, pql, "list_work_items", project_id)
+        if pql_error:
+            return pql_error
 
         params = WorkItemQueryParams(
             pql=pql,
@@ -196,6 +199,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
                 ISO dates for target_date/start_date, "None" for unset values.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
+        pql_error = guard_pql(client, workspace_slug, pql, "count_work_items")
+        if pql_error:
+            return pql_error
         params = WorkItemCountQueryParams(pql=pql, group_by=group_by, sub_group_by=sub_group_by)
         try:
             response: WorkItemGroupedCountResponse = client.work_items.count_workspace(
@@ -519,9 +525,7 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         # `group`, NEVER its name (names are per-project and renameable).
         cascading = False
         if cascade and state is not None:
-            target_state = client.states.retrieve(
-                workspace_slug=workspace_slug, project_id=project_id, state_id=state
-            )
+            target_state = client.states.retrieve(workspace_slug=workspace_slug, project_id=project_id, state_id=state)
             cascading = target_state.group in TERMINAL_GROUPS
 
         data = UpdateWorkItem(
@@ -702,6 +706,9 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             Paginated envelope with results, total_count, next_cursor, prev_cursor.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
+        pql_error = guard_pql(client, workspace_slug, pql, "list_archived_work_items", project_id)
+        if pql_error:
+            return pql_error
         params = WorkItemQueryParams(
             pql=pql,
             order_by=order_by,

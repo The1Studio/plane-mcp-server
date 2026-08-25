@@ -19,6 +19,7 @@ from plane.models.query_params import WorkItemQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.pql_support import guard_pql
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
@@ -248,6 +249,9 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             Paginated envelope with results, total_count, next_cursor, prev_cursor.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
+        pql_error = guard_pql(client, workspace_slug, pql, "list_cycle_work_items", project_id)
+        if pql_error:
+            return pql_error
         params = WorkItemQueryParams(
             pql=pql,
             order_by=order_by,
