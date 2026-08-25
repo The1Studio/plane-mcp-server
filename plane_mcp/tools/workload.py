@@ -123,7 +123,15 @@ def register_workload_tools(mcp: FastMCP) -> None:
             Each entry in tasks[] is {id, project_id, identifier, name,
             hours (this assignee's share of the issue's estimate),
             total_hours (the issue's undivided estimate), assignee_count,
-            start_date, target_date, state_group, overdue}.
+            start_date, target_date, state_group, state_name, state_color,
+            overdue}.
+
+            state_color is the state's own colour and is a FREE-FORM CSS
+            colour string, not a guaranteed hex: server-side it is an
+            unvalidated CharField, so "", "#fa0", "rgb(...)" and named
+            colours are all reachable. Do not parse it, and do not assume it
+            is non-empty — fall back to the state group's colour when it is
+            blank. state_name is likewise normalised to "" rather than null.
 
             rows[] is ordered Unassigned first, then ascending by
             assignee_name (case-insensitive) — rows[0] is NOT the busiest
