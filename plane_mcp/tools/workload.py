@@ -90,19 +90,32 @@ def register_workload_tools(mcp: FastMCP) -> None:
                 Max span: day <= 92, week <= 366, month <= 730 days.
             project_ids: Optional list of project UUIDs to scope to (intersected
                 with the caller's accessible projects).
+            project_id: Optional single project UUID — when set, queries the
+                project-scoped workload route instead of the workspace route.
             assignee_ids: Optional list of assignee UUIDs to filter rows by.
             state_group: Optional list of state groups to include
                 (backlog, unstarted, started, completed, cancelled). No
                 default filter — when omitted, every state group is
                 returned, including completed and cancelled.
 
+        Scope:
+            When `project_id` is omitted this queries the WORKSPACE route,
+            which sums every project the caller may read — for a WORKSPACE
+            ADMIN that is all projects in the workspace; for everyone else it
+            is only the projects they are an active member of. `project_ids`
+            is intersected with that set (never trusted outright), and
+            `project_id` narrows to that one project. So a workspace-wide
+            total and an explicit all-projects total agree for an admin, but
+            for a non-admin they agree only when the explicit list is a
+            subset of that caller's memberships. A GUEST in a project with
+            `guest_view_all_features` off sees only their own assigned items,
+            so their totals are scope-partial by design.
+
         Note:
             The matrix counts LEAF work items only — a parent (an item with
             sub-items) never appears as its own hours row; its hours live on
             its sub-items (prevents double-counting). Use
             `get_workload_rollups` to read a parent's derived totals.
-            project_id: Optional single project UUID — when set, queries the
-                project-scoped workload route instead of the workspace route.
 
         Returns:
             Workload response: {granularity, date_from, date_to, periods[]
