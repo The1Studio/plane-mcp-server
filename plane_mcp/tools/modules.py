@@ -19,6 +19,8 @@ from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.pql_support import guard_pql
+from plane_mcp.tools.cascade_ext import TERMINAL_GROUPS
+from plane_mcp.tools.cascade_ext import _send as _cascade_send
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
@@ -139,10 +141,35 @@ def register_module_tools(mcp: FastMCP) -> None:
         members: list[str] | None = None,
         external_source: str | None = None,
         external_id: str | None = None,
+        cascade: bool = False,
         workspace_slug: str | None = None,
-    ) -> Module:
+    ) -> Module | dict[str, Any]:
         """
         Update a module by ID.
+
+        A plain update_module NEVER cascades, from any client: without
+        `cascade=True`, a status change to "completed"/"cancelled" just
+        updates the module itself — work items in it are left untouched,
+        exactly like the web UI's "only change this module" path.
+
+        When `cascade=True` AND `status` is a terminal value ("completed" or
+        "cancelled"), the module's new status and every currently-eligible
+        member plus descendant (the members' full sub-trees, recursive) are
+        applied together via the fork's module cascade-apply endpoint
+        (The1Studio/plane branch `feat/module-cascade-terminal-status`)
+        instead of a plain status PATCH. When `cascade=True` but `status` is
+        not terminal (backlog/planned/in-progress/paused, or any unrecognized
+        value this tool coerces to None), this is also a plain PATCH — the
+        flag never raises, so a caller may set it once and reuse it across
+        calls. Use `preview_module_cascade` first to see what would cascade.
+
+        The cascade is capped: more than MAX_MODULE_CASCADE_ITEMS (100) live
+        items is a 400 REFUSAL, NOT a partial apply — the server writes
+        nothing, module status included. A headless caller has no modal to
+        read the refusal from; the raised error names the cap, so treat it
+        as a decision point, not a transport failure to retry.
+
+        Requires the fork's `cascade_ext` app on the server.
 
         Args:
             workspace_slug: The workspace slug identifier
@@ -157,9 +184,17 @@ def register_module_tools(mcp: FastMCP) -> None:
             members: List of user IDs who are members of the module
             external_source: External system source name
             external_id: External system identifier
+            cascade: Default False — the plain PATCH path, byte-for-byte what
+                this tool did before `cascade` existed. When True AND the
+                validated status is terminal, cascade-apply is called instead
+                (see above).
 
         Returns:
-            Updated Module object
+            Updated Module object — unless the cascade path fires, in which
+            case the cascade-apply response is returned instead: {"module",
+            "status", "updated": ["<uuid>", ...], "rejected": [{"id",
+            "reason"}, ...]}. Call retrieve_module afterward for the full
+            module object.
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
@@ -168,17 +203,52 @@ def register_module_tools(mcp: FastMCP) -> None:
             status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
         )
 
+        # The cascade branch keys off the VALIDATED status, never the raw
+        # argument: `status="Completed"` coerces to None above, so a cascade
+        # keyed on the raw string would fire for a status the patch is NOT
+        # setting. Terminality is a property of the module status literal
+        # ("completed"/"cancelled"), not of anything renameable per-project.
+        # Determined BEFORE constructing `data` — mirrors update_work_item's
+        # `cascading` sequencing exactly, so `data.status` below can exclude
+        # itself from the plain PATCH the same way `data.state` does there.
+        cascading = bool(cascade and validated_status in TERMINAL_GROUPS)
+
         data = UpdateModule(
             name=name,
             description=description,
             start_date=start_date,
             target_date=target_date,
-            status=validated_status,
+            # Cascading moves `status` via cascade-apply below, not this PATCH.
+            status=None if cascading else validated_status,
             lead=lead,
             members=members,
             external_source=external_source,
             external_id=external_id,
         )
+
+        if cascading:
+            # cascade-apply writes the module's status AND every eligible item
+            # in ONE transaction (M5); the module's status must NOT also go out
+            # as a plain PATCH (mirrors update_work_item excluding `state`) —
+            # enforced above by constructing `data.status = None` while
+            # cascading, not just by this truthiness check.
+            # Omitting `item_ids` (the contract's documented headless path)
+            # makes the server take every currently-eligible item. Any OTHER
+            # field set alongside status+cascade must still land — cascade-apply
+            # only ever touches `status`, so it must not silently swallow a
+            # caller's other requested changes. Apply them first, status
+            # excluded, via the ordinary PATCH; then the apply body carries no
+            # item_ids and this tool returns the cascade-apply response.
+            if data.model_dump(exclude_none=True):
+                client.modules.update(
+                    workspace_slug=workspace_slug, project_id=project_id, module_id=module_id, data=data
+                )
+            return _cascade_send(
+                client,
+                "POST",
+                f"/workspaces/{workspace_slug}/projects/{project_id}/modules/{module_id}/cascade-apply/",
+                json={"status": validated_status},
+            )
 
         return client.modules.update(
             workspace_slug=workspace_slug, project_id=project_id, module_id=module_id, data=data
