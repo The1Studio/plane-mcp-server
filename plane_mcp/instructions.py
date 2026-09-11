@@ -13,6 +13,30 @@ items always belong to a project; ask which if one is not named.
 5. List an epic's children: list_work_items(project_id, pql='childOf("<EPIC-IDENTIFIER>")')
    using the epic's human-readable identifier (e.g. "PROJ-12") from retrieve_work_item.
 
+## Workspace bootstrap (create_workspace -> invite -> create project)
+
+Standing up a workspace from scratch. Both write steps are irreversible enough
+to need confirmation first: create_workspace makes a top-level tenant, and
+invite_workspace_member sends a real email.
+
+1. create_workspace(name, slug, organization_size=None) -- instance-admin only,
+   and only on a server carrying the fork's POST /api/v1/workspaces/. A 403
+   names which of the two reasons applies: not an instance admin, or creation
+   disabled on the instance.
+2. Then BOTH of these, or the new workspace is unreachable next session:
+   - set_workspace("<slug>") to retarget this session (the tool does NOT do this
+     for you -- it must not silently move where later calls land);
+   - add "<slug>" to PLANE_WORKSPACE_SLUGS in the MCP server config and restart
+     the server. Without it the next session cannot address the workspace at all
+     -- the same declared-slug trap as workspace discovery.
+3. invite_workspace_member(email, role) -- owner-only, and ASYNC. It adds the
+   person to the invite list, not to the members; they appear in
+   get_workspace_members only after accepting. Check with
+   list_workspace_invites; a repeat invite for the same address returns
+   already_invited rather than sending twice, and an accepted one cannot be
+   revoked (that is a membership change, not an invite change).
+4. create_project(workspace_slug="<slug>", ...) per project, then add members.
+
 ## GitHub status-automation config (get_github_state_config / set_github_state_config)
 
 Three tiers, most-specific-wins: built-in defaults -> instance-wide "global" ->

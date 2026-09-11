@@ -1,5 +1,8 @@
 """Workspace-related tools for Plane MCP Server."""
 
+from typing import Any
+
+import httpx
 from fastmcp import FastMCP
 from plane.models.projects import ProjectFeature
 from plane.models.users import UserLite
@@ -11,6 +14,125 @@ from plane_mcp.client import (
     get_plane_client_context,
     set_active_workspace,
 )
+from plane_mcp.tools.workload import _send
+
+# Workspace-invitation route segment. The plane-sdk models no invitation
+# resource at all (no `invite` in its WorkspacesAPI), so invitations go
+# through the raw `_send` helper instead of an SDK method -- the same choice
+# projects.py makes for the fork-owned `project_ext` endpoints. Named once so
+# a rename is a one-line change.
+_INVITATIONS_PATH_SEGMENT = "invitations"
+
+# Instance-level workspace-collection route. Deliberately NOT slug-scoped:
+# this is the one workspace tool that targets the instance, not a workspace.
+_WORKSPACES_COLLECTION_PATH = "/workspaces/"
+
+
+def _owner_only_error() -> RuntimeError:
+    """Explain a 403 from the invitation endpoints.
+
+    `WorkspaceInvitationsViewset` is gated by `WorkspaceOwnerPermission`, not
+    the workspace-admin check most other endpoints use -- so a key whose user
+    is a workspace Admin (role 20) but not the workspace *owner* is refused
+    here while every neighbouring tool succeeds.
+
+    Plane answers the same 403 for a slug the key cannot reach at all, so this
+    does NOT claim to disambiguate the two; it names both possibilities and
+    leaves the judgement to the caller.
+    """
+    return RuntimeError(
+        "Workspace invitations require workspace OWNER permission: the endpoint is "
+        "gated by Plane's WorkspaceOwnerPermission, not the workspace-admin check "
+        "other tools use, so a key whose user is an Admin (role 20) but not the "
+        "owner is refused. Plane returns this same 403 for a workspace slug the key "
+        "cannot reach at all, so this is not proof of an owner-permission problem "
+        "-- confirm the slug is one your account is a member of before concluding "
+        "the key is under-privileged."
+    )
+
+
+def _invitation_request(client: Any, method: str, path: str, json: dict[str, Any] | None = None) -> Any:
+    """`_send` for invitation routes, with the owner-permission 403 explained.
+
+    Only 403 is translated. A 404 stays a raw `httpx.HTTPStatusError` on
+    purpose: this endpoint ships upstream (makeplane/plane and the fork alike),
+    so a 404 here does NOT mean a missing fork app and must not be reported as
+    one -- `tests/test_project_admin.py::test_non_404_error_is_not_masked` pins
+    that distinction for the `project_ext` tools and it holds here too.
+    """
+    try:
+        return _send(client, method, path, json=json)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403:
+            raise _owner_only_error() from exc
+        raise
+
+
+def _as_invite_list(payload: Any) -> list[dict[str, Any]]:
+    """Normalize the invitations list response into a list of invite dicts.
+
+    The viewset returns a bare array, but `list_workspace_invites` promises the
+    caller a list and the dedupe scan iterates it -- so an unexpected shape is
+    reported plainly here rather than leaking a dict into code that will call
+    `.get` on it or abort with an unrelated `AttributeError`.
+    """
+    if isinstance(payload, dict) and isinstance(payload.get("results"), list):
+        payload = payload["results"]  # pagination envelope, should the server add one
+    if not isinstance(payload, list):
+        raise RuntimeError(f"Expected a list of workspace invitations from the server, got {type(payload).__name__}.")
+    return [item for item in payload if isinstance(item, dict)]
+
+
+def _workspace_create_error(exc: httpx.HTTPStatusError) -> RuntimeError:
+    """Turn a failed `POST /workspaces/` into a message naming the real cause.
+
+    Three distinct server answers share one status code family and are easy to
+    conflate, so each is named explicitly rather than left to a bare status
+    line:
+
+    * 403 `INSTANCE_ADMIN_REQUIRED` -- the key's user is not an instance admin.
+    * 403 `WORKSPACE_CREATION_DISABLED` -- the instance turned the feature off.
+    * 409 `WORKSPACE_SLUG_EXISTS` -- the slug is taken.
+
+    A 409 body is `{"slug": "...", "error_code": "..."}` -- it carries no
+    `error` key, so the shared `_send` helper's error extraction finds nothing
+    and would degrade to a bare "409 Conflict for <url>". Reading the body here
+    is what keeps the reason visible.
+    """
+    status = exc.response.status_code
+    try:
+        body = exc.response.json()
+    except Exception:  # noqa: BLE001 - non-JSON error body; report the status alone
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    code = body.get("error_code") or ""
+
+    if status == 403 and code == "WORKSPACE_CREATION_DISABLED":
+        return RuntimeError(
+            "This Plane instance has workspace creation disabled "
+            "[WORKSPACE_CREATION_DISABLED]. An instance admin must enable it."
+        )
+    if status == 403:
+        detail = f" [{code}]" if code else ""
+        return RuntimeError(
+            f"Creating a workspace requires instance admin permission{detail}. The API key "
+            "belongs to a user who is not an instance admin on this Plane deployment."
+        )
+    if status == 409:
+        message = body.get("slug") or body.get("error") or "the slug is already in use"
+        return RuntimeError(
+            f"Cannot create the workspace: {message} [WORKSPACE_SLUG_EXISTS]. "
+            "Pick a different `slug`, or call `set_workspace` with the existing slug "
+            "if you meant to target the workspace that already owns it."
+        )
+    if status == 400:
+        # DRF field errors arrive as {"<field>": ["<reason>", ...]} with no
+        # `error` key, so `_send` cannot surface them -- without this the caller
+        # sees only "400 Bad Request" for the most likely failure of all
+        # (a name or slug that fails validation).
+        return RuntimeError(f"The server rejected the workspace payload [400]: {body}")
+    return RuntimeError(f"Creating the workspace failed [{status}]: {body}")
 
 
 def _discover_workspaces() -> list[dict] | None:
@@ -251,3 +373,190 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         data = WorkspaceFeature(**feature_data)
 
         return client.workspaces.update_features(workspace_slug=workspace_slug, data=data)
+
+    @mcp.tool()
+    def list_workspace_invites(workspace_slug: str | None = None) -> list[dict[str, Any]]:
+        """
+        List the pending and past invitations to a workspace.
+
+        Invitations are a separate resource from membership: an invite exists
+        from the moment it is sent until the person accepts or it is revoked,
+        and only on acceptance does the person appear in
+        `get_workspace_members`. So a person who says "I was invited" but is
+        absent from the member list is usually visible here.
+
+        Requires workspace OWNER permission -- see `invite_workspace_member`
+        for the caveat, which applies to every invitation tool.
+
+        Args:
+            workspace_slug: Address a workspace other than the session default.
+
+        Returns:
+            List of invite objects, each with `id`, `email`, `role`,
+            `created_at`, `updated_at`, `responded_at`, and `accepted`.
+            `accepted` false with a null `responded_at` means still pending.
+        """
+        client, workspace_slug = get_plane_client_context(workspace_slug)
+        path = f"/workspaces/{workspace_slug}/{_INVITATIONS_PATH_SEGMENT}/"
+        return _as_invite_list(_invitation_request(client, "GET", path))
+
+    @mcp.tool()
+    def invite_workspace_member(
+        email: str,
+        role: int = 15,
+        workspace_slug: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Invite someone to a workspace by email.
+
+        WRITE OPERATION THAT SENDS AN EMAIL: calling this notifies a real person
+        at `email` and grants them access once they accept. Confirm the address,
+        the role, and the target workspace with the user before calling it.
+
+        The invitation is asynchronous -- this adds the person to the workspace's
+        invite list, NOT to its members. They appear in `get_workspace_members`
+        only after accepting. Do not follow this with a project-membership call
+        expecting it to work; invite first, confirm acceptance, then add projects.
+
+        Idempotent per email: if an invite for this address already exists it is
+        returned with `already_invited: true` and nothing is sent. Matching
+        ignores case and surrounding whitespace, so `A@x.com` and `a@x.com` are
+        treated as the same person rather than invited twice.
+
+        Requires workspace OWNER permission. This endpoint is gated by Plane's
+        `WorkspaceOwnerPermission`, not the workspace-admin check most other
+        tools use, so an API key whose user is an Admin (role 20) but not the
+        workspace owner is refused with a 403 that names this. Plane returns
+        that same 403 for a slug the key cannot reach at all, so the error does
+        not claim to tell the two apart.
+
+        Args:
+            email: Address to invite.
+            role: Workspace role -- 20 (Admin), 15 (Member, default), or 5 (Guest).
+            workspace_slug: Address a workspace other than the session default.
+
+        Returns:
+            The created invite object (`id`, `email`, `role`, `created_at`,
+            `updated_at`, `responded_at`, `accepted`), or on a repeat call that
+            same object plus `already_invited: true` and a `note` saying no new
+            invitation was sent.
+        """
+        if not email or not email.strip():
+            raise ValueError("invite_workspace_member requires a non-empty email")
+
+        client, workspace_slug = get_plane_client_context(workspace_slug)
+        path = f"/workspaces/{workspace_slug}/{_INVITATIONS_PATH_SEGMENT}/"
+
+        wanted = email.strip().lower()
+        for invite in _as_invite_list(_invitation_request(client, "GET", path)):
+            if str(invite.get("email") or "").strip().lower() == wanted:
+                return {
+                    "already_invited": True,
+                    **invite,
+                    "note": (
+                        "An invitation for this email already exists on the workspace, so no "
+                        "new one was sent. `accepted: false` with a null `responded_at` means it "
+                        "is still pending; `accepted: true` means the person is already a member."
+                    ),
+                }
+
+        return _invitation_request(client, "POST", path, json={"email": email.strip(), "role": role})
+
+    @mcp.tool()
+    def revoke_workspace_invite(invite_id: str, workspace_slug: str | None = None) -> dict[str, Any]:
+        """
+        Revoke a workspace invitation.
+
+        WRITE OPERATION, and it revokes access: use `list_workspace_invites` to
+        find the `id` first, and confirm with the user which address it belongs
+        to before calling it.
+
+        Only a still-open invitation can be revoked. The server refuses with a
+        400 when the invite was already accepted or already responded to --
+        removing an accepted person is a membership change, not an invite
+        change, and is not this tool.
+
+        Requires workspace OWNER permission -- see `invite_workspace_member`.
+
+        Args:
+            invite_id: `id` of the invitation, from `list_workspace_invites`.
+            workspace_slug: Address a workspace other than the session default.
+
+        Returns:
+            dict with `revoked: true` and the `invite_id` that was removed.
+        """
+        if not invite_id or not invite_id.strip():
+            raise ValueError("revoke_workspace_invite requires a non-empty invite_id")
+
+        client, workspace_slug = get_plane_client_context(workspace_slug)
+        path = f"/workspaces/{workspace_slug}/{_INVITATIONS_PATH_SEGMENT}/{invite_id.strip()}/"
+        _invitation_request(client, "DELETE", path)
+        return {"revoked": True, "invite_id": invite_id.strip()}
+
+    @mcp.tool()
+    def create_workspace(
+        name: str,
+        slug: str,
+        organization_size: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Create a new workspace on this Plane instance.
+
+        WRITE OPERATION THAT IS NOT REVERSIBLE VIA THE API: this creates a
+        top-level tenant that every workspace-scoped tool then accepts as a
+        slug, and there is no API route to delete it. Confirm the name and slug
+        with the user before calling it.
+
+        Requires instance admin -- a key belonging to an ordinary workspace
+        Admin is refused with a 403 naming that. The instance may also have
+        workspace creation disabled outright, which is reported separately by
+        its `error_code` so "not allowed" is never misread as "slug taken".
+
+        This targets `POST /api/v1/workspaces/`, an endpoint the The1Studio
+        Plane fork ships separately from this MCP server. Against upstream
+        Plane / Plane Cloud, or a fork deployment predating it, the call fails
+        with a 404 rather than creating anything.
+
+        Args:
+            name: Display name of the workspace, up to 80 characters.
+            slug: URL slug, up to 48 characters, letters/digits/underscore/hyphen
+                only, and it must not already be in use.
+            organization_size: Optional size bucket, e.g. "1-10". Pass None to omit.
+
+        Returns:
+            The created workspace (`id`, `name`, `slug`, `owner`,
+            `organization_size`, `logo_url`, `created_at`, `updated_at`) with
+            `role: 20` (you are its Owner) and `total_members: 1`, plus
+            `next_steps` naming the two follow-ups that are easy to miss.
+        """
+        if not name or not name.strip():
+            raise ValueError("create_workspace requires a non-empty name")
+        if not slug or not slug.strip():
+            raise ValueError("create_workspace requires a non-empty slug")
+
+        # No workspace exists yet to scope the call to, so this is one of the
+        # rare genuinely workspace-independent calls (`get_me` is the other).
+        client, _ = get_plane_client_context(require_workspace=False)
+
+        payload: dict[str, Any] = {
+            "name": name.strip(),
+            "slug": slug.strip(),
+            "organization_size": organization_size,
+        }
+        try:
+            created = _send(client, "POST", _WORKSPACES_COLLECTION_PATH, json=payload)
+        except httpx.HTTPStatusError as exc:
+            raise _workspace_create_error(exc) from exc
+
+        result = dict(created) if isinstance(created, dict) else {}
+        new_slug = result.get("slug") or slug.strip()
+        result["next_steps"] = [
+            f"Call set_workspace({new_slug!r}) to make it the session default for later calls.",
+            (
+                f"Add {new_slug!r} to PLANE_WORKSPACE_SLUGS in the MCP server config (or "
+                "PLANE_WORKSPACE_SLUG for a single-workspace setup) and restart the server. "
+                "Without that the next session cannot address this workspace at all -- the "
+                "same trap documented for workspace discovery."
+            ),
+        ]
+        return result

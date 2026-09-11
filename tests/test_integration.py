@@ -325,6 +325,10 @@ EXPECTED_TOOLS = [
     "get_workspace_members",
     "get_features",
     "update_workspace_features",
+    "list_workspace_invites",
+    "invite_workspace_member",
+    "revoke_workspace_invite",
+    "create_workspace",
     # Cycle tools
     "list_cycles",
     "create_cycle",

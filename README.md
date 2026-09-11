@@ -346,6 +346,21 @@ now rejects `network` outright and points here instead.
 | `get_workspace_members` | Get all members of the current workspace |
 | `get_features` | Get feature flags (workspace, or a project's if `project_id` given) |
 | `update_workspace_features` | Update features of the current workspace |
+| `create_workspace` | Create a workspace on the instance — instance admin only, and not reversible via the API § |
+| `list_workspace_invites` | List a workspace's invitations (pending and past) — owner only ¶ |
+| `invite_workspace_member` | Invite someone to a workspace by email; sends an email, no-op if already invited — owner only ¶ |
+| `revoke_workspace_invite` | Revoke an invitation that has not been accepted — owner only ¶ |
+
+§ Requires the The1Studio fork's `POST /api/v1/workspaces/` endpoint on the
+server ([`The1Studio/plane#107`](https://github.com/The1Studio/plane/issues/107)).
+Against upstream Plane / Plane Cloud, or a fork deployment older than that
+endpoint, the call fails with a 404. Requires an instance-admin key.
+
+¶ Gated by Plane's `WorkspaceOwnerPermission`, not the workspace-admin check
+most other tools use — an API key whose user is a workspace Admin (role 20) but
+not the workspace *owner* is refused. Note that Plane returns the same 403 for a
+slug the key cannot reach at all, so a 403 here does not by itself prove an
+owner-permission problem.
 
 ### Workspace Views
 
