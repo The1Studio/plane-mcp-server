@@ -155,12 +155,19 @@ class TestCreateWorkspace:
         result = _get_tool_fn(mcp, "create_workspace")(name="DevOps", slug="devops")
         assert "dev-ops" in " ".join(result["next_steps"])
 
-    def test_omits_organization_size_when_not_given(self, monkeypatch, mcp):
+    def test_sends_organization_size_as_null_when_not_given(self, monkeypatch, mcp):
+        """The key is always present; omission is expressed as JSON `null`.
+
+        Named "sends as null", not "omits": the assertion below contradicts an
+        omit-named test, and `Workspace.organization_size` is
+        `blank=True, null=True`, so the server accepts null.
+        """
         client = _FakeClient()
         _stub_context(monkeypatch, client)
         calls = _capture(monkeypatch, _mock_response(201, _CREATED))
 
         _get_tool_fn(mcp, "create_workspace")(name="DevOps", slug="devops")
+        assert "organization_size" in calls[0]["json"]
         assert calls[0]["json"]["organization_size"] is None
 
     def test_trims_name_and_slug(self, monkeypatch, mcp):
@@ -182,31 +189,49 @@ class TestCreateWorkspace:
         with pytest.raises(ValueError, match="non-empty slug"):
             fn(name="DevOps", slug="   ")
 
-    def test_403_when_not_instance_admin(self, monkeypatch, mcp):
-        """A non-instance-admin key must be told that, not shown a bare 403."""
+    def _403_message(self, monkeypatch, mcp, payload: dict) -> str:
         client = _FakeClient()
         _stub_context(monkeypatch, client)
-        _capture(
-            monkeypatch,
-            _mock_response(403, {"error": "Instance admin required", "error_code": "INSTANCE_ADMIN_REQUIRED"}),
-        )
+        _capture(monkeypatch, _mock_response(403, payload))
 
         fn = _get_tool_fn(mcp, "create_workspace")
-        with pytest.raises(RuntimeError, match="instance admin"):
+        with pytest.raises(RuntimeError) as excinfo:
             fn(name="DevOps", slug="devops")
+        return str(excinfo.value)
+
+    def test_403_when_not_instance_admin(self, monkeypatch, mcp):
+        """A non-instance-admin key must be told that, not shown a bare 403.
+
+        Asserted on the INSTANCE_ADMIN_REQUIRED-specific wording, not on
+        "instance admin": the creation-disabled message says "An instance admin
+        must enable it", so a bare `match="instance admin"` would stay green
+        even if this cause were mis-routed into that branch. The negative half
+        below is what makes the two branches distinguishable.
+        """
+        message = self._403_message(
+            monkeypatch,
+            mcp,
+            {"error": "Instance admin required", "error_code": "INSTANCE_ADMIN_REQUIRED"},
+        )
+
+        assert "INSTANCE_ADMIN_REQUIRED" in message
+        assert "not an instance admin" in message
+        assert "disabled" not in message
+        assert "WORKSPACE_CREATION_DISABLED" not in message
 
     def test_403_when_creation_disabled_is_distinct_from_admin(self, monkeypatch, mcp):
-        """The two 403 causes share a status code and must not be conflated."""
-        client = _FakeClient()
-        _stub_context(monkeypatch, client)
-        _capture(
-            monkeypatch,
-            _mock_response(403, {"error": "Disabled", "error_code": "WORKSPACE_CREATION_DISABLED"}),
+        """The two 403 causes share a status code and must not be conflated.
+
+        Symmetric to `test_403_when_not_instance_admin`: each cause must name
+        itself AND disclaim the other, or one branch could absorb both.
+        """
+        message = self._403_message(
+            monkeypatch, mcp, {"error": "Disabled", "error_code": "WORKSPACE_CREATION_DISABLED"}
         )
 
-        fn = _get_tool_fn(mcp, "create_workspace")
-        with pytest.raises(RuntimeError, match="WORKSPACE_CREATION_DISABLED"):
-            fn(name="DevOps", slug="devops")
+        assert "WORKSPACE_CREATION_DISABLED" in message
+        assert "disabled" in message
+        assert "not an instance admin" not in message
 
     def test_409_surfaces_the_slug_conflict(self, monkeypatch, mcp):
         """A taken slug is the likeliest failure and must not read as a bare 409.
@@ -229,6 +254,12 @@ class TestCreateWorkspace:
             fn(name="DevOps", slug="devops")
 
     def test_400_surfaces_field_errors(self, monkeypatch, mcp):
+        """The rejection must name the offending FIELD, not just the status.
+
+        `match="rejected the workspace payload"` alone pins the static prefix
+        only: drop the body from the message and the test still passes, though
+        surfacing the field errors is its entire point.
+        """
         client = _FakeClient()
         _stub_context(monkeypatch, client)
         _capture(
@@ -239,22 +270,69 @@ class TestCreateWorkspace:
         )
 
         fn = _get_tool_fn(mcp, "create_workspace")
-        with pytest.raises(RuntimeError, match="rejected the workspace payload"):
+        with pytest.raises(RuntimeError, match="rejected the workspace payload") as excinfo:
             fn(name="DevOps", slug="dev ops")
 
-    def test_404_is_not_masked_as_a_fork_app_problem(self, monkeypatch, mcp):
+        assert "slug" in str(excinfo.value)
+        assert "Enter a valid 'slug'" in str(excinfo.value)
+
+    def test_404_names_the_missing_fork_endpoint(self, monkeypatch, mcp):
         """A missing endpoint reads as 'not found', never as the project_ext message.
 
         Routing this through `_fork_endpoint_error` would blame a missing
-        The1Studio fork app; the endpoint is fork-owned but the failure mode
-        the caller needs named is 'this server predates it'.
+        The1Studio fork app; the endpoint is fork-owned but the failure mode the
+        caller needs named is 'this server does not have POST
+        /api/v1/workspaces/'. Asserting `match="404"` accepted a body-less
+        default that named no cause at all, which is the only message most
+        callers ever see until The1Studio/plane#108 deploys -- so the assertion
+        names the route and says it is not the project_ext problem.
         """
         client = _FakeClient()
         _stub_context(monkeypatch, client)
         _capture(monkeypatch, _mock_response(404, {"error": "Not found."}))
 
         fn = _get_tool_fn(mcp, "create_workspace")
-        with pytest.raises(RuntimeError, match="404"):
+        with pytest.raises(RuntimeError, match="404") as excinfo:
+            fn(name="DevOps", slug="devops")
+
+        message = str(excinfo.value)
+        assert "POST /api/v1/workspaces/" in message
+        assert "The1Studio/plane#108" in message
+        assert "Nothing was created" in message
+        # The project_ext message would send the caller chasing the wrong app.
+        assert "project_ext" not in message
+
+    def test_201_without_a_usable_body_is_an_error(self, monkeypatch, mcp):
+        """A shapeless 201 must raise, not report a fake success.
+
+        `_send` returns None for an empty body, and `{}` / a non-dict body has
+        no `slug` -- so returning `next_steps` anyway would promise the created
+        workspace the docstring documents and instruct `set_workspace(...)` for
+        a slug that was never read (the server normalizes slugs).
+        """
+        fn = _get_tool_fn(mcp, "create_workspace")
+
+        # `_mock_response` always attaches a JSON body, so the genuinely empty
+        # one -- the case `_send` turns into None -- is built directly.
+        empty = httpx.Response(201, request=_REQUEST)
+        assert empty.content == b""
+
+        for response in (empty, _mock_response(201, {}), _mock_response(201, []), _mock_response(201, "created")):
+            client = _FakeClient()
+            _stub_context(monkeypatch, client)
+            _capture(monkeypatch, response)
+
+            with pytest.raises(RuntimeError, match="no usable body"):
+                fn(name="DevOps", slug="devops")
+
+    def test_201_without_a_slug_is_an_error(self, monkeypatch, mcp):
+        """A dict body missing `slug` cannot back a `set_workspace` instruction."""
+        client = _FakeClient()
+        _stub_context(monkeypatch, client)
+        _capture(monkeypatch, _mock_response(201, {"id": "ws-uuid-1", "name": "DevOps"}))
+
+        fn = _get_tool_fn(mcp, "create_workspace")
+        with pytest.raises(RuntimeError, match="no usable body"):
             fn(name="DevOps", slug="devops")
 
     def test_does_not_auto_set_the_active_workspace(self, monkeypatch, mcp):

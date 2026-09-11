@@ -1,6 +1,8 @@
 """Workspace-related tools for Plane MCP Server."""
 
+import posixpath
 from typing import Any
+from urllib.parse import quote, unquote
 
 import httpx
 from fastmcp import FastMCP
@@ -51,21 +53,111 @@ def _owner_only_error() -> RuntimeError:
     )
 
 
+def _invitation_error(exc: httpx.HTTPStatusError) -> RuntimeError | None:
+    """Turn the invite serializer's 400 field errors into one legible sentence.
+
+    `WorkspaceInviteSerializer` rejects the three likeliest mistakes with DRF
+    field errors -- `{"email": ["Invalid email address"]}`, `{"role": ["Invalid
+    role"]}`, `{"non_field_errors": ["Email already invited"]}`. None carries an
+    `error` key, so the shared `_send` helper's extraction finds nothing, the
+    custom raise is skipped, and the caller reaches
+    `response.raise_for_status()`: httpx's own "400 Bad Request for <url>"
+    followed by a developer.mozilla.org link, with nothing about the address or
+    the role. Parsing the body here is what keeps the reason visible -- the same
+    gap `_workspace_create_error` closes for `create_workspace`.
+
+    Deliberately narrow, in two directions, so it only ever adds information:
+
+    * a non-400 is not this function's business -- other statuses keep the
+      handling their callers already give them (403 -> owner message, 404 ->
+      raw `httpx.HTTPStatusError`);
+    * a body that DOES carry a usable `error` key is left alone, because `_send`
+      already folded it (plus any `error_code`) into a richer message than this
+      could build. That is the shape the revoke endpoint returns, which is why
+      `revoke_workspace_invite`'s 400 keeps raising `httpx.HTTPStatusError`.
+
+    Returns None when the caller should keep the original exception.
+    """
+    if exc.response.status_code != 400:
+        return None
+    try:
+        body = exc.response.json()
+    except Exception:  # noqa: BLE001 - non-JSON error body; nothing to add
+        return None
+    if not isinstance(body, dict) or not body or body.get("error"):
+        return None
+
+    reasons = body.get("non_field_errors")
+    if isinstance(reasons, list) and reasons:
+        # A cross-field rejection ("Email already invited") reads best on its
+        # own -- prefixing it with the DRF field name adds nothing.
+        detail = "; ".join(str(reason) for reason in reasons)
+    else:
+        flat: list[str] = []
+        for field, reason in body.items():
+            values = reason if isinstance(reason, list) else [reason]
+            flat.extend(f"{field}: {value}" for value in values)
+        detail = "; ".join(flat)
+    return RuntimeError(f"The server rejected the invitation [400]: {detail}")
+
+
 def _invitation_request(client: Any, method: str, path: str, json: dict[str, Any] | None = None) -> Any:
     """`_send` for invitation routes, with the owner-permission 403 explained.
 
-    Only 403 is translated. A 404 stays a raw `httpx.HTTPStatusError` on
-    purpose: this endpoint ships upstream (makeplane/plane and the fork alike),
-    so a 404 here does NOT mean a missing fork app and must not be reported as
-    one -- `tests/test_project_admin.py::test_non_404_error_is_not_masked` pins
-    that distinction for the `project_ext` tools and it holds here too.
+    403 is translated into `_owner_only_error` and 400 into the serializer's
+    field errors (`_invitation_error`). A 404 stays a raw
+    `httpx.HTTPStatusError` on purpose: this endpoint ships upstream
+    (makeplane/plane and the fork alike), so a 404 here does NOT mean a missing
+    fork app and must not be reported as one --
+    `tests/test_project_admin.py::test_non_404_error_is_not_masked` pins that
+    distinction for the `project_ext` tools and it holds here too.
     """
     try:
         return _send(client, method, path, json=json)
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 403:
             raise _owner_only_error() from exc
+        field_error = _invitation_error(exc)
+        if field_error is not None:
+            raise field_error from exc
         raise
+
+
+def _invite_id_segment(invite_id: str) -> str:
+    """Validate and percent-encode an invite id for the DELETE path.
+
+    `revoke_workspace_invite` is the first place a caller-supplied *resource id*
+    -- not an internally generated UUID -- lands in a path segment, and the tool
+    is a DELETE, so a `..` or a `/` in the argument must not be able to reshape
+    which resource is addressed.
+
+    Encoding is necessary but NOT sufficient, which is the trap here. httpx
+    percent-DECODES a URL before it normalizes the path, so:
+
+    * `quote("..", safe="")` is `".."` -- dots are unreserved in RFC 3986 -- and
+      the segment still collapses, `.../invitations/../` -> `/workspaces/<slug>/`;
+    * `%2F` decodes back to a real separator, so the traversal resolves anyway.
+      Probed: `x/../../workspaces/other/invitations/y` reached
+      `/api/v1/workspaces/<slug>/workspaces/other/invitations/y/`.
+
+    So the check names the property that actually matters, on the DECODED value:
+    interpolating the id must not change the templated path's structure. `..`
+    and `.` are caught because they collapse the tail away, a slash because it
+    is a separator regardless of what it was encoded as, and every other dot-run
+    spelling falls out of the same comparison instead of needing its own case.
+    A trailing slash is refused too -- it is not a segment an id can be.
+    """
+    segment = quote(invite_id.strip(), safe="")
+    decoded = unquote(segment)
+    # No trailing slash on the probe: `normpath` drops one, which would fail
+    # every ordinary id. The injected segment is what the comparison is about.
+    probe = f"/workspaces/_/{_INVITATIONS_PATH_SEGMENT}/{decoded}"
+    if "/" in decoded or posixpath.normpath(probe) != probe:
+        raise ValueError(
+            f"Invalid invite_id {invite_id.strip()!r}: it must be a single path segment, "
+            "such as the `id` from list_workspace_invites."
+        )
+    return segment
 
 
 def _as_invite_list(payload: Any) -> list[dict[str, Any]]:
@@ -132,6 +224,21 @@ def _workspace_create_error(exc: httpx.HTTPStatusError) -> RuntimeError:
         # sees only "400 Bad Request" for the most likely failure of all
         # (a name or slug that fails validation).
         return RuntimeError(f"The server rejected the workspace payload [400]: {body}")
+    if status == 404:
+        # Until the fork's endpoint is deployed this is the ONLY answer any
+        # caller gets, so the default branch's `failed [404]: {}` -- the body is
+        # empty because a Django 404 serves HTML and the `json()` above raises
+        # into its `except` -- would name no cause and route nowhere. The route
+        # is fork-owned (`_WORKSPACES_COLLECTION_PATH`), which is why this must
+        # not be folded into `_fork_endpoint_error`: that message names
+        # `project_ext` and would send the caller chasing the wrong app.
+        return RuntimeError(
+            "Creating a workspace failed [404]: this server does not expose "
+            "POST /api/v1/workspaces/. That route is shipped by the The1Studio Plane "
+            "fork (The1Studio/plane#108, still open against `staging`); upstream Plane, "
+            "Plane Cloud, and any fork deployment predating it answer 404 here. Nothing "
+            "was created -- use an existing workspace, or have the instance upgraded."
+        )
     return RuntimeError(f"Creating the workspace failed [{status}]: {body}")
 
 
@@ -380,10 +487,14 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         List the pending and past invitations to a workspace.
 
         Invitations are a separate resource from membership: an invite exists
-        from the moment it is sent until the person accepts or it is revoked,
-        and only on acceptance does the person appear in
+        from the moment it is recorded until the person accepts or it is
+        revoked, and only on acceptance does the person appear in
         `get_workspace_members`. So a person who says "I was invited" but is
         absent from the member list is usually visible here.
+
+        This is also the only way to tell whether an invite reached anyone: the
+        tool that creates one sends no email, so a pending row here means the
+        person has not been notified (see `invite_workspace_member`).
 
         Requires workspace OWNER permission -- see `invite_workspace_member`
         for the caveat, which applies to every invitation tool.
@@ -409,9 +520,22 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         """
         Invite someone to a workspace by email.
 
-        WRITE OPERATION THAT SENDS AN EMAIL: calling this notifies a real person
-        at `email` and grants them access once they accept. Confirm the address,
-        the role, and the target workspace with the user before calling it.
+        WRITE OPERATION THAT CREATES A PENDING MEMBERSHIP GRANT -- AND SENDS NO
+        EMAIL. Calling this records an invitation that grants access to `email`
+        once accepted; it does NOT notify anyone. The v1 endpoint behind this
+        tool
+        (`POST /api/v1/workspaces/{slug}/invitations/`) writes the row and
+        returns it; only the web app's own invite flow dispatches the
+        `workspace_invitation` task (The1Studio/plane#109). So the invitee learns
+        nothing from this call -- they see the pending invite only when they next
+        sign in to Plane and open their invitations page, and otherwise must be
+        told out of band. Confirm the address, the role, and the target workspace
+        with the user before calling it, and tell them to notify the person
+        themselves.
+
+        Nothing is sent, so the side effect is silent: the row exists and grants
+        access on acceptance, and a row nobody acts on is never cleaned up. Check
+        with `list_workspace_invites` rather than assuming the person was reached.
 
         The invitation is asynchronous -- this adds the person to the workspace's
         invite list, NOT to its members. They appear in `get_workspace_members`
@@ -419,9 +543,11 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         expecting it to work; invite first, confirm acceptance, then add projects.
 
         Idempotent per email: if an invite for this address already exists it is
-        returned with `already_invited: true` and nothing is sent. Matching
+        returned with `already_invited: true` and nothing is created. Matching
         ignores case and surrounding whitespace, so `A@x.com` and `a@x.com` are
-        treated as the same person rather than invited twice.
+        treated as the same person rather than invited twice. This check is by
+        email only and the server makes the same one -- neither notices that the
+        address is ALREADY A MEMBER, which the server accepts as a fresh invite.
 
         Requires workspace OWNER permission. This endpoint is gated by Plane's
         `WorkspaceOwnerPermission`, not the workspace-admin check most other
@@ -439,7 +565,7 @@ def register_workspace_tools(mcp: FastMCP) -> None:
             The created invite object (`id`, `email`, `role`, `created_at`,
             `updated_at`, `responded_at`, `accepted`), or on a repeat call that
             same object plus `already_invited: true` and a `note` saying no new
-            invitation was sent.
+            invitation was created.
         """
         if not email or not email.strip():
             raise ValueError("invite_workspace_member requires a non-empty email")
@@ -450,9 +576,13 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         wanted = email.strip().lower()
         for invite in _as_invite_list(_invitation_request(client, "GET", path)):
             if str(invite.get("email") or "").strip().lower() == wanted:
+                # `**invite` comes FIRST: spread last it would let a server row
+                # carrying its own `already_invited` override the `True` this
+                # branch just determined, so the field could state the opposite
+                # of what the code did. The tool's own key wins.
                 return {
-                    "already_invited": True,
                     **invite,
+                    "already_invited": True,
                     "note": (
                         "An invitation for this email already exists on the workspace, so no "
                         "new one was sent. `accepted: false` with a null `responded_at` means it "
@@ -480,6 +610,8 @@ def register_workspace_tools(mcp: FastMCP) -> None:
 
         Args:
             invite_id: `id` of the invitation, from `list_workspace_invites`.
+                Must be a single path segment; anything that would not survive
+                as one is refused rather than sent.
             workspace_slug: Address a workspace other than the session default.
 
         Returns:
@@ -487,9 +619,10 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         """
         if not invite_id or not invite_id.strip():
             raise ValueError("revoke_workspace_invite requires a non-empty invite_id")
+        segment = _invite_id_segment(invite_id)
 
         client, workspace_slug = get_plane_client_context(workspace_slug)
-        path = f"/workspaces/{workspace_slug}/{_INVITATIONS_PATH_SEGMENT}/{invite_id.strip()}/"
+        path = f"/workspaces/{workspace_slug}/{_INVITATIONS_PATH_SEGMENT}/{segment}/"
         _invitation_request(client, "DELETE", path)
         return {"revoked": True, "invite_id": invite_id.strip()}
 
@@ -513,15 +646,18 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         its `error_code` so "not allowed" is never misread as "slug taken".
 
         This targets `POST /api/v1/workspaces/`, an endpoint the The1Studio
-        Plane fork ships separately from this MCP server. Against upstream
-        Plane / Plane Cloud, or a fork deployment predating it, the call fails
-        with a 404 rather than creating anything.
+        Plane fork ships separately from this MCP server
+        (The1Studio/plane#107; the PR delivering it, #108, is still open against
+        `staging`). Against upstream Plane / Plane Cloud, or a fork deployment
+        predating it, the call fails with a 404 naming this -- and until #108 is
+        deployed, that 404 is the answer every caller gets.
 
         Args:
             name: Display name of the workspace, up to 80 characters.
             slug: URL slug, up to 48 characters, letters/digits/underscore/hyphen
                 only, and it must not already be in use.
-            organization_size: Optional size bucket, e.g. "1-10". Pass None to omit.
+            organization_size: Optional size bucket, e.g. "1-10". Sent as JSON
+                `null` when omitted, which the server accepts.
 
         Returns:
             The created workspace (`id`, `name`, `slug`, `owner`,
@@ -548,8 +684,24 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         except httpx.HTTPStatusError as exc:
             raise _workspace_create_error(exc) from exc
 
-        result = dict(created) if isinstance(created, dict) else {}
-        new_slug = result.get("slug") or slug.strip()
+        # A 201 whose body is empty (`_send` returns None for an empty body) or
+        # is not an object cannot be reported as a success: the docstring
+        # promises the created workspace back, `next_steps` must quote the
+        # SERVER's slug (the server normalizes it), and falling back to the
+        # caller's input slug would instruct `set_workspace('<input>')` for a
+        # workspace that was never read. `_as_invite_list` raises for the same
+        # reason -- silence would be indistinguishable from success.
+        if not isinstance(created, dict) or not created.get("slug"):
+            raise RuntimeError(
+                "The server answered 201 for the workspace but returned no usable body "
+                f"(got {type(created).__name__})"
+                + (f" {created!r}" if created else "")
+                + ". The workspace may have been created; call list_workspaces() to "
+                "check before retrying, so a retry does not create a second one."
+            )
+
+        result = dict(created)
+        new_slug = result["slug"]
         result["next_steps"] = [
             f"Call set_workspace({new_slug!r}) to make it the session default for later calls.",
             (

@@ -348,19 +348,40 @@ now rejects `network` outright and points here instead.
 | `update_workspace_features` | Update features of the current workspace |
 | `create_workspace` | Create a workspace on the instance — instance admin only, and not reversible via the API § |
 | `list_workspace_invites` | List a workspace's invitations (pending and past) — owner only ¶ |
-| `invite_workspace_member` | Invite someone to a workspace by email; sends an email, no-op if already invited — owner only ¶ |
+| `invite_workspace_member` | Invite someone to a workspace by email; records the invite and sends **no** email, no-op if already invited — owner only ¶ |
 | `revoke_workspace_invite` | Revoke an invitation that has not been accepted — owner only ¶ |
 
 § Requires the The1Studio fork's `POST /api/v1/workspaces/` endpoint on the
-server ([`The1Studio/plane#107`](https://github.com/The1Studio/plane/issues/107)).
-Against upstream Plane / Plane Cloud, or a fork deployment older than that
-endpoint, the call fails with a 404. Requires an instance-admin key.
+server ([`The1Studio/plane#107`](https://github.com/The1Studio/plane/issues/107));
+the PR delivering it,
+[`The1Studio/plane#108`](https://github.com/The1Studio/plane/pull/108), is still
+open against `staging`. Against upstream Plane / Plane Cloud, or a fork
+deployment older than that endpoint, the call fails with a 404. Requires an
+instance-admin key.
 
 ¶ Gated by Plane's `WorkspaceOwnerPermission`, not the workspace-admin check
 most other tools use — an API key whose user is a workspace Admin (role 20) but
 not the workspace *owner* is refused. Note that Plane returns the same 403 for a
 slug the key cannot reach at all, so a 403 here does not by itself prove an
 owner-permission problem.
+
+**Invitations send no email.**
+`invite_workspace_member` calls
+`POST /api/v1/workspaces/{slug}/invitations/`, which records the invitation and
+returns it — the v1 endpoint dispatches no mail; only the web app's own invite
+flow does
+([`The1Studio/plane#109`](https://github.com/The1Studio/plane/issues/109)). The
+invitee is therefore not notified: they see the pending invite when they next
+sign in to Plane and open their invitations page, and otherwise have to be told
+out of band. Check `list_workspace_invites` rather than assuming the person was
+reached — a pending row means nobody was.
+
+**A new workspace is unaddressable until you declare its slug.**
+After `create_workspace`, call `set_workspace("<slug>")` for the current session
+and add the slug to `PLANE_WORKSPACE_SLUGS` in the MCP server config, then
+restart the server. Without the second step the next session cannot address the
+workspace at all — the same declared-slug trap as workspace discovery above. The
+tool's returned `next_steps` says both.
 
 ### Workspace Views
 
