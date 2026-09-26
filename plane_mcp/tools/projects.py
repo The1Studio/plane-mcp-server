@@ -1,6 +1,6 @@
 """Project-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import Any
 
 import httpx
 from fastmcp import FastMCP
@@ -26,6 +26,7 @@ from plane.models.users import UserLite
 
 from plane_mcp.clearing import build_clear_payload
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.enum_validation import require_enum_member
 from plane_mcp.tools.workload import _send
 
 # Fork-owned bulk endpoint segment for `add_project_members` (The1Studio
@@ -180,10 +181,9 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate timezone against allowed literal values
-        validated_timezone: TimezoneEnum | None = (
-            timezone if timezone in get_args(TimezoneEnum) else None  # type: ignore[assignment]
-        )
+        # An unrecognised timezone is rejected, never coerced to None — same
+        # silent-drop defect as plane-mcp-server#56.
+        validated_timezone = require_enum_member(timezone, TimezoneEnum, "timezone", "create_project")
 
         # UPSTREAM BUG WORKAROUND — do NOT send project_lead in the create call.
         #
@@ -331,10 +331,8 @@ def register_project_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate timezone against allowed literal values
-        validated_timezone: TimezoneEnum | None = (
-            timezone if timezone in get_args(TimezoneEnum) else None  # type: ignore[assignment]
-        )
+        # Rejected, never coerced (see create_project).
+        validated_timezone = require_enum_member(timezone, TimezoneEnum, "timezone", "update_project")
 
         # `network` is NOT in the core /api/v1/ project serializer
         # (plane.api.serializers.project.ProjectCreateSerializer.Meta.fields), so

@@ -1,6 +1,6 @@
 """Cycle-related tools for Plane MCP Server."""
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
@@ -23,6 +23,27 @@ from plane_mcp.pql_support import guard_pql
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
 
 logger = get_logger(__name__)
+
+
+def _as_date(value: str | None) -> date | None:
+    """Parse a Plane date string to a `date`, ignoring any time component.
+
+    Plane's cycle API returns `end_date` as a full ISO-8601 datetime
+    (`"2026-09-17T00:00:00Z"`) whenever the field is populated — even though
+    the value is written from a bare `YYYY-MM-DD`. Compare these as DATES;
+    comparing the raw strings makes a cycle ending today look like it ends in
+    the future (see `manage_cycle_archive`).
+
+    Returns None for an absent or unparseable value, which callers treat as
+    "no usable end_date" rather than as a comparison against a garbage string.
+    """
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        logger.warning("Unparseable cycle end_date %r — treating as unset", value)
+        return None
 
 
 def register_cycle_tools(mcp: FastMCP) -> None:
@@ -321,10 +342,9 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         """
         Archive or unarchive a cycle.
 
-        Plane requires the cycle end_date to be in the past before archiving.
-        When archive=True, this tool automatically sets end_date to today if
-        the cycle is still active (end_date is missing or in the future),
-        then archives it.
+        Plane requires the cycle end_date to be strictly in the past before
+        archiving. When archive=True, this tool automatically moves end_date
+        into the past if the cycle is still active, then archives it.
 
         Args:
             project_id: UUID of the project
@@ -338,15 +358,34 @@ def register_cycle_tools(mcp: FastMCP) -> None:
         if not archive:
             return client.cycles.unarchive(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
 
-        today = date.today().isoformat()
+        today = date.today()
         cycle = client.cycles.retrieve(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
-        end_date = cycle.end_date if hasattr(cycle, "end_date") else None
-        if not end_date or end_date > today:
+        end_date = _as_date(getattr(cycle, "end_date", None))
+
+        # Archive only if the end_date is not already in the past. The
+        # comparison is on DATES, not on the raw API strings: Plane returns
+        # end_date as `"<date>T00:00:00Z"` whenever one is set, and that text
+        # sorts AFTER the bare `"<date>"` we build from today, purely because
+        # 'T' is greater than end-of-string. Comparing raw strings therefore
+        # read a cycle ending TODAY as ending in the future and skipped the
+        # update (plane-mcp-server#53).
+        #
+        # `>=` rather than `>`: end_date == today is not "in the past"
+        # (plane-mcp-server#54).
+        if end_date is None or end_date >= today:
+            # Yesterday, not today. Plane's archive endpoint rejects the
+            # request outright when `end_date >= timezone.now()`
+            # (plane/app/views/cycle/archive.py), and the write path anchors a
+            # bare date at 00:00 in the PROJECT's timezone — so writing today
+            # still compares >= now() for the whole of today, in every
+            # timezone, and the archive then fails with "Only completed cycles
+            # can be archived". A date strictly before today is the first one
+            # that always satisfies the server.
             client.cycles.update(
                 workspace_slug=workspace_slug,
                 project_id=project_id,
                 cycle_id=cycle_id,
-                data=UpdateCycle(end_date=today),
+                data=UpdateCycle(end_date=(today - timedelta(days=1)).isoformat()),
             )
 
         return client.cycles.archive(workspace_slug=workspace_slug, project_id=project_id, cycle_id=cycle_id)
@@ -354,11 +393,15 @@ def register_cycle_tools(mcp: FastMCP) -> None:
     @mcp.tool()
     def complete_cycle(project_id: str, cycle_id: str, workspace_slug: str | None = None) -> Cycle:
         """
-        Complete (close) a cycle by setting its end date to today.
+        Complete (close) a cycle by moving its end date into the past.
 
-        Plane has no explicit "complete" action — a cycle is considered complete
-        when its end_date is in the past. This tool sets end_date to today,
-        effectively closing the cycle.
+        Plane has no explicit "complete" action — a cycle is considered
+        complete when its end_date is in the past. This tool sets end_date to
+        yesterday, which closes the cycle and leaves it archivable; setting it
+        to *today* would not, because Plane's archive endpoint rejects
+        `end_date >= now()` ("Only completed cycles can be archived") and the
+        write path anchors a bare date at 00:00 in the project's timezone
+        (plane-mcp-server#54).
 
         Args:
             project_id: UUID of the project
@@ -368,10 +411,10 @@ def register_cycle_tools(mcp: FastMCP) -> None:
             Updated Cycle object
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
-        today = date.today().isoformat()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
         return client.cycles.update(
             workspace_slug=workspace_slug,
             project_id=project_id,
             cycle_id=cycle_id,
-            data=UpdateCycle(end_date=today),
+            data=UpdateCycle(end_date=yesterday),
         )
