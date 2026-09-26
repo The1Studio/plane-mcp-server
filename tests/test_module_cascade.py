@@ -129,20 +129,28 @@ class TestUpdateModuleCascadeDefaults:
         assert client.modules.update_calls[0]["data"].status == "in-progress"
         assert result.status == "in-progress"
 
-    def test_unrecognized_status_string_is_coerced_to_none_and_never_cascades(self, monkeypatch, mcp):
-        """A caller passing a raw string that fails ModuleStatusEnum
-        validation (e.g. wrong casing) must not fire the cascade branch,
-        which keys off the VALIDATED status — never the raw argument."""
+    def test_unrecognized_status_string_is_rejected_and_never_cascades(self, monkeypatch, mcp):
+        """A raw string that fails ModuleStatusEnum validation (e.g. wrong
+        casing) must be REJECTED — not coerced to None — and must never fire
+        the cascade branch, which keys off the validated status.
+
+        Inverted from the previous `test_unrecognized_status_string_is_coerced_
+        to_none_and_never_cascades`, which asserted the coercion itself. That
+        pin described the DEFECT: a caller passing `status="Completed"` got a
+        200 with the field silently dropped (plane-mcp-server#56 class). The
+        cascade half of the guarantee is unchanged and still asserted here —
+        which is why this test still monkeypatches the cascade path to fail if
+        it is reached.
+        """
         client = _FakeClient()
         _stub_context(monkeypatch, client)
         monkeypatch.setattr("plane_mcp.tools.cascade_ext.httpx.request", _fail_if_called)
 
         fn = _get_tool_fn(mcp, "update_module")
-        result = fn(project_id="proj-1", module_id="mod-1", status="Completed", cascade=True)
+        with pytest.raises(ValueError, match="status"):
+            fn(project_id="proj-1", module_id="mod-1", status="Completed", cascade=True)
 
-        assert len(client.modules.update_calls) == 1
-        assert client.modules.update_calls[0]["data"].status is None
-        assert result.status is None
+        assert client.modules.update_calls == [], "a rejected status must not reach the PATCH"
 
     def test_cascade_true_with_no_status_change_is_plain_patch(self, monkeypatch, mcp):
         client = _FakeClient()

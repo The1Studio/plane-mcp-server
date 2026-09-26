@@ -1,6 +1,6 @@
 """Module-related tools for Plane MCP Server."""
 
-from typing import Annotated, Any, get_args
+from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from fastmcp.utilities.logging import get_logger
@@ -18,6 +18,7 @@ from plane.models.query_params import WorkItemQueryParams
 from pydantic import Field
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.enum_validation import require_enum_member
 from plane_mcp.pql_support import guard_pql
 from plane_mcp.tools.cascade_ext import TERMINAL_GROUPS
 from plane_mcp.tools.cascade_ext import _send as _cascade_send
@@ -93,10 +94,9 @@ def register_module_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate status against allowed literal values
-        validated_status: ModuleStatusEnum | None = (
-            status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
-        )
+        # An unrecognised status is rejected, never coerced to None — same
+        # silent-drop defect as plane-mcp-server#56.
+        validated_status = require_enum_member(status, ModuleStatusEnum, "status", "create_module")
 
         data = CreateModule(
             name=name,
@@ -198,19 +198,15 @@ def register_module_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate status against allowed literal values
-        validated_status: ModuleStatusEnum | None = (
-            status if status in get_args(ModuleStatusEnum) else None  # type: ignore[assignment]
-        )
-
-        # The cascade branch keys off the VALIDATED status, never the raw
-        # argument: `status="Completed"` coerces to None above, so a cascade
-        # keyed on the raw string would fire for a status the patch is NOT
-        # setting. Terminality is a property of the module status literal
-        # ("completed"/"cancelled"), not of anything renameable per-project.
+        # Rejected, never coerced (see create_module). The cascade branch keys
+        # off this validated value, never the raw argument, so a status the
+        # patch is NOT setting can never fire a cascade. Terminality is a
+        # property of the module status literal ("completed"/"cancelled"), not
+        # of anything renameable per-project.
         # Determined BEFORE constructing `data` — mirrors update_work_item's
         # `cascading` sequencing exactly, so `data.status` below can exclude
         # itself from the plain PATCH the same way `data.state` does there.
+        validated_status = require_enum_member(status, ModuleStatusEnum, "status", "update_module")
         cascading = bool(cascade and validated_status in TERMINAL_GROUPS)
 
         data = UpdateModule(

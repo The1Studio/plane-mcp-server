@@ -85,6 +85,7 @@ def register_views_ext_tools(mcp: FastMCP) -> None:
         order_by: str | None = None,
         cursor: str | None = None,
         per_page: int | None = None,
+        workspace_slug: str | None = None,
     ) -> dict[str, Any]:
         """
         List work items across an entire workspace (cross-project), grouped and
@@ -118,6 +119,14 @@ def register_views_ext_tools(mcp: FastMCP) -> None:
             cursor: Pagination cursor from a previous response's `next_cursor`
                 / `prev_cursor`.
             per_page: Page size override.
+            workspace_slug: The workspace slug identifier. Pass this explicitly
+                to address a workspace other than the session default: the
+                session default set by `set_workspace` lives in a `ContextVar`
+                that is scoped per call context, so it does NOT reliably carry
+                across separate MCP tool invocations (notably under HTTP
+                transport). Every other tool in this server accepts this
+                parameter; this one previously did not (plane-mcp-server#41),
+                leaving no way to route around the context-scoped default.
 
         Returns:
             The raw response dict. Envelope keys: grouped_by, sub_grouped_by,
@@ -128,7 +137,7 @@ def register_views_ext_tools(mcp: FastMCP) -> None:
             is a flat list of work items. There is no SDK model for this
             shape — consume the dict directly.
         """
-        client, workspace_slug = get_plane_client_context()
+        client, workspace_slug = get_plane_client_context(workspace_slug)
 
         params: dict[str, Any] = {}
         if search:

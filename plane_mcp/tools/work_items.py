@@ -1,7 +1,7 @@
 """Work item-related tools for Plane MCP Server."""
 
 from html import escape
-from typing import Annotated, Any, get_args
+from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from fastmcp.utilities.logging import get_logger
@@ -21,6 +21,7 @@ from pydantic import Field
 
 from plane_mcp.clearing import build_clear_payload
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.enum_validation import require_enum_member
 from plane_mcp.pql_support import guard_pql
 from plane_mcp.tools.cascade_ext import TERMINAL_GROUPS
 from plane_mcp.tools.cascade_ext import _send as _cascade_send
@@ -301,9 +302,10 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        validated_priority: PriorityEnum | None = (
-            priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
-        )
+        # An unrecognised priority is rejected, never coerced to None: the
+        # caller otherwise gets a 200 and the server default with no signal
+        # that their value was discarded (plane-mcp-server#56).
+        validated_priority = require_enum_member(priority, PriorityEnum, "priority", "create_work_item")
 
         data = CreateWorkItem(
             name=name,
@@ -514,9 +516,8 @@ def register_work_item_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        validated_priority: PriorityEnum | None = (
-            priority if priority in get_args(PriorityEnum) else None  # type: ignore[assignment]
-        )
+        # See create_work_item: reject rather than drop an unknown priority.
+        validated_priority = require_enum_member(priority, PriorityEnum, "priority", "update_work_item")
 
         # Determine whether this call must cascade: only possible when the
         # caller is actually changing `state` in this same call — reusing a

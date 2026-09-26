@@ -1,6 +1,6 @@
 """State-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import Any
 
 from fastmcp import FastMCP
 from plane.models.enums import GroupEnum
@@ -12,6 +12,7 @@ from plane.models.states import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.enum_validation import require_enum_member
 
 
 def register_state_tools(mcp: FastMCP) -> None:
@@ -73,10 +74,10 @@ def register_state_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate group against allowed literal values
-        validated_group: GroupEnum | None = (
-            group if group in get_args(GroupEnum) else None  # type: ignore[assignment]
-        )
+        # A bad group is rejected, never coerced to None: a state created with
+        # a silently-dropped group breaks the workflow cascade downstream
+        # (plane-mcp-server#55).
+        validated_group = require_enum_member(group, GroupEnum, "group", "create_state")
 
         data = CreateState(
             name=name,
@@ -143,10 +144,8 @@ def register_state_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate group against allowed literal values
-        validated_group: GroupEnum | None = (
-            group if group in get_args(GroupEnum) else None  # type: ignore[assignment]
-        )
+        # See create_state: reject rather than drop an unrecognised group.
+        validated_group = require_enum_member(group, GroupEnum, "group", "update_state")
 
         data = UpdateState(
             name=name,

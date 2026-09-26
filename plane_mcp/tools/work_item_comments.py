@@ -1,6 +1,6 @@
 """Work item comment-related tools for Plane MCP Server."""
 
-from typing import Any, get_args
+from typing import Any
 
 from fastmcp import FastMCP
 from plane.models.enums import AccessEnum
@@ -12,6 +12,7 @@ from plane.models.work_items import (
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.enum_validation import require_enum_member
 
 
 def register_work_item_comment_tools(mcp: FastMCP) -> None:
@@ -98,10 +99,9 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate access against allowed literal values
-        validated_access: AccessEnum | None = (
-            access if access in get_args(AccessEnum) else None  # type: ignore[assignment]
-        )
+        # An unrecognised access is rejected, never coerced to None — same
+        # silent-drop defect as plane-mcp-server#56.
+        validated_access = require_enum_member(access, AccessEnum, "access", "create_work_item_comment")
 
         data = CreateWorkItemComment(
             comment_html=comment_html,
@@ -148,10 +148,8 @@ def register_work_item_comment_tools(mcp: FastMCP) -> None:
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
 
-        # Validate access against allowed literal values
-        validated_access: AccessEnum | None = (
-            access if access in get_args(AccessEnum) else None  # type: ignore[assignment]
-        )
+        # Rejected, never coerced (see create_work_item_comment).
+        validated_access = require_enum_member(access, AccessEnum, "access", "update_work_item_comment")
 
         data = UpdateWorkItemComment(
             comment_html=comment_html,
