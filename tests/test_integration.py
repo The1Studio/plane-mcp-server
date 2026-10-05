@@ -289,6 +289,7 @@ EXPECTED_TOOLS = [
     "list_pages",
     "retrieve_page",
     "create_page",
+    "update_page",
     # Work item activity tools
     "list_work_item_activities",
     "retrieve_work_item_activity",
