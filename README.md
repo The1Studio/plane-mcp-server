@@ -335,9 +335,19 @@ now rejects `network` outright and points here instead.
 
 | Tool Name | Description |
 |-----------|-------------|
-| `list_pages` | List pages (workspace, or a project's if `project_id` given) |
-| `retrieve_page` | Retrieve a page by ID (workspace, or project's if `project_id` given) |
+| `list_pages` | List pages (workspace, or a project's if `project_id` given ‖) |
+| `retrieve_page` | Retrieve a page by ID (workspace, or project's if `project_id` given ‖) — a project page includes `description_html` and plain text |
 | `create_page` | Create a workspace or project page |
+| `update_page` | Update a project page's name and/or content (`description_html`) ‖ |
+
+‖ Project-page tools require the The1Studio fork's `page_ext` app on the server: core Plane's
+`/api/v1/` has no project-page route (the `.../projects/<id>/pages/` path answers
+`404 {"error": "Page not found."}`, which these tools report as an actionable error). The caller
+must be an active member of the project (a workspace admin who is not in it gets 403 — add them
+with `add_project_members`), another user's private page is never visible, and a locked page (423)
+or archived page (409) cannot be updated. `update_page` replaces the content with the html you send;
+the server keeps the collaborative-editor state consistent and records the previous content in the
+page's version history.
 
 ### Workspaces
 
