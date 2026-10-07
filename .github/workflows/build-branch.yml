@@ -30,7 +30,7 @@ env:
 jobs:
   release_build_setup:
     name: Release Build Setup
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, linux, x64, arc, the1studio, org]
     outputs:
       gh_buildx_driver: ${{ steps.set_env_variables.outputs.BUILDX_DRIVER }}
       gh_buildx_version: ${{ steps.set_env_variables.outputs.BUILDX_VERSION }}
@@ -85,7 +85,7 @@ jobs:
 
   build_and_push:
     name: Build-Push Plane MCP Server Docker Image
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, linux, x64, arc, the1studio, org]
     needs: [release_build_setup]
     permissions:
       contents: read
@@ -114,7 +114,7 @@ jobs:
   publish_release:
     if: ${{ needs.release_build_setup.outputs.build_type == 'Release' }}
     name: Build Release
-    runs-on: ubuntu-22.04
+    runs-on: [self-hosted, linux, x64, arc, the1studio, org]
     needs:
       [
         release_build_setup,
