@@ -5,7 +5,7 @@ import mimetypes
 import os
 import socket
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests as _requests
 from fastmcp import FastMCP
@@ -49,35 +49,77 @@ _PRIVATE_NETWORKS = [
     ipaddress.ip_network("::1/128"),  # IPv6 loopback
     ipaddress.ip_network("fc00::/7"),  # IPv6 unique-local
     ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
+    ipaddress.ip_network("0.0.0.0/8"),  # "this network" (reaches localhost on Linux)
+    ipaddress.ip_network("100.64.0.0/10"),  # carrier-grade NAT
+    ipaddress.ip_network("224.0.0.0/4"),  # IPv4 multicast
+    ipaddress.ip_network("ff00::/8"),  # IPv6 multicast
+    ipaddress.ip_network("::/128"),  # IPv6 unspecified
 ]
+
+_MAX_REDIRECTS = 5
+
+
+def _is_blocked_address(addr: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    # Unwrap IPv4-mapped IPv6 (::ffff:a.b.c.d) so it is judged as the IPv4 it reaches.
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+        addr = addr.ipv4_mapped
+    return any(addr in net for net in _PRIVATE_NETWORKS)
 
 
 def _assert_public_url(url: str) -> None:
-    """Raise ValueError if the URL resolves to a private/reserved IP address."""
+    """Raise ValueError if the URL resolves to ANY private/reserved IP address."""
     parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Unsupported URL scheme in {url!r}; only http/https are allowed.")
     hostname = parsed.hostname
     if not hostname:
         raise ValueError(f"Invalid URL (no hostname): {url!r}")
 
     try:
-        resolved_ip = socket.getaddrinfo(hostname, None)[0][4][0]
+        infos = socket.getaddrinfo(hostname, None)
     except socket.gaierror as exc:
         raise ValueError(f"Could not resolve hostname {hostname!r}: {exc}") from exc
+    if not infos:
+        raise ValueError(f"Could not resolve hostname {hostname!r}")
 
-    addr = ipaddress.ip_address(resolved_ip)
-    if any(addr in net for net in _PRIVATE_NETWORKS):
-        raise ValueError(
-            f"URL {url!r} resolves to a private/reserved address ({resolved_ip}) "
-            "and cannot be fetched for security reasons."
-        )
+    # Every resolved address must be public: a mixed answer could be used by the
+    # HTTP client to connect to the private one.
+    for info in infos:
+        resolved_ip = info[4][0]
+        try:
+            addr = ipaddress.ip_address(resolved_ip.split("%", 1)[0])
+        except ValueError as exc:
+            raise ValueError(f"Unparseable resolved address {resolved_ip!r} for {hostname!r}") from exc
+        if _is_blocked_address(addr):
+            raise ValueError(
+                f"URL {url!r} resolves to a private/reserved address ({resolved_ip}) "
+                "and cannot be fetched for security reasons."
+            )
+
+
+def _fetch_public_url(url: str) -> Any:
+    """GET a public URL, following redirects manually and re-validating every hop."""
+    current = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        _assert_public_url(current)
+        resp = _requests.get(current, timeout=_HTTP_TIMEOUT, allow_redirects=False)
+        if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("Location")
+            if not location:
+                raise ValueError(f"Redirect from {current!r} without a Location header")
+            current = urljoin(current, location)
+            continue
+        resp.raise_for_status()
+        return resp
+    raise ValueError(f"Too many redirects fetching {url!r} (limit {_MAX_REDIRECTS})")
 
 
 def _attachment_to_dict(attachment: Any, workspace_slug: str) -> dict[str, Any]:
     data = attachment.model_dump()
     attrs = data.get("attributes") or {}
-    data["name"] = attrs.get("name")
+    data["name"] = attrs.get("name") or data.get("name")
     data["size"] = attrs.get("size") or data.get("size")
-    data["content_type"] = attrs.get("type")
+    data["content_type"] = attrs.get("type") or data.get("content_type")
     return data
 
 
@@ -197,11 +239,8 @@ def register_work_item_attachment_tools(mcp: FastMCP) -> None:
         Returns:
             Created attachment metadata: id, name, size, content_type.
         """
-        _assert_public_url(url)
-
         try:
-            resp = _requests.get(url, timeout=_HTTP_TIMEOUT)
-            resp.raise_for_status()
+            resp = _fetch_public_url(url)
         except _requests.RequestException as e:
             raise ValueError(f"Failed to fetch file from {url!r}: {e}") from e
 
