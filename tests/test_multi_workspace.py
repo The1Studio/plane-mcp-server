@@ -232,3 +232,28 @@ class TestWorkspaceDiscovery:
             lambda **_: (type("C", (), {"users": _Users()})(), ""),
         )
         assert [w["slug"] for w in ws._discover_workspaces()] == ["ok"]
+
+
+class TestSetWorkspaceClear:
+    """set_workspace('') / whitespace must clear exactly like None (#48)."""
+
+    @pytest.mark.parametrize("blank", [None, "", "   "])
+    def test_blank_clears_with_same_response_as_none(self, monkeypatch, blank):
+        import asyncio
+
+        from fastmcp import FastMCP
+
+        from plane_mcp.tools import workspaces as ws
+
+        def _no_network(*_a, **_k):
+            raise AssertionError("a clear must not probe the API")
+
+        monkeypatch.setattr(ws, "get_plane_client_context", _no_network)
+        m = FastMCP("t")
+        ws.register_workspace_tools(m)
+        fn = asyncio.run(m.get_tool("set_workspace")).fn
+
+        set_active_workspace("something")
+        result = fn(blank)
+        assert result == {"active": None, "reachable": None, "note": "cleared; using configured default"}
+        assert get_active_workspace() is None
