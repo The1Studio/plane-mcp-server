@@ -23,6 +23,8 @@ from plane_mcp.clearing import build_clear_payload
 from plane_mcp.client import get_plane_client_context
 from plane_mcp.enum_validation import require_enum_member
 from plane_mcp.pql_support import guard_pql
+from plane_mcp.sdk_compat import expands_user_fields
+from plane_mcp.sdk_compat import retrieve_work_item as _retrieve_compat
 from plane_mcp.tools.cascade_ext import TERMINAL_GROUPS
 from plane_mcp.tools.cascade_ext import _send as _cascade_send
 from plane_mcp.tools.pql_reference import PQL_FIELD_HINT, PQL_FULL_REFERENCE
@@ -364,6 +366,16 @@ def register_work_item_tools(mcp: FastMCP) -> None:
             external_source=external_source,
             order_by=order_by,
         )
+
+        if expands_user_fields(expand):
+            # plane-sdk types created_by/updated_by as str; expanding returns an object (#36).
+            return _retrieve_compat(
+                client,
+                workspace_slug=workspace_slug,
+                project_id=project_id,
+                work_item_id=work_item_id,
+                params=params,
+            )
 
         return client.work_items.retrieve(
             workspace_slug=workspace_slug,

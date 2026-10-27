@@ -7,10 +7,11 @@ from plane.models.enums import WorkItemRelationTypeEnum
 from plane.models.work_items import (
     CreateWorkItemRelation,
     RemoveWorkItemRelation,
-    WorkItemRelationResponse,
 )
 
 from plane_mcp.client import get_plane_client_context
+from plane_mcp.sdk_compat import WorkItemRelationsCompat
+from plane_mcp.sdk_compat import list_work_item_relations as _list_relations_compat
 
 
 def register_work_item_relation_tools(mcp: FastMCP) -> None:
@@ -21,7 +22,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
         project_id: str,
         work_item_id: str,
         workspace_slug: str | None = None,
-    ) -> WorkItemRelationResponse:
+    ) -> WorkItemRelationsCompat:
         """
         List relations for a work item.
 
@@ -30,7 +31,7 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
             work_item_id: UUID of the work item
 
         Returns:
-            WorkItemRelationResponse containing lists of related work items by relation type:
+            Relations object containing lists of related work items by relation type:
             - blocking: Work items that are blocking this item
             - blocked_by: Work items that this item is blocked by
             - duplicate: Work items that are duplicates of this item
@@ -41,7 +42,9 @@ def register_work_item_relation_tools(mcp: FastMCP) -> None:
             - finish_before: Work items that finish before this item
         """
         client, workspace_slug = get_plane_client_context(workspace_slug)
-        return client.work_items.relations.list(
+        # plane-sdk's WorkItemRelationResponse rejects object entries (#37).
+        return _list_relations_compat(
+            client,
             workspace_slug=workspace_slug,
             project_id=project_id,
             work_item_id=work_item_id,
