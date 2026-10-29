@@ -386,12 +386,16 @@ def register_workspace_tools(mcp: FastMCP) -> None:
         want to repeat it on each call.
 
         Args:
-            workspace_slug: Slug to make the session default. Pass None to clear
-                the override and fall back to the configured default.
+            workspace_slug: Slug to make the session default. Pass None (or an empty/blank
+                string) to clear the override and fall back to the configured default.
 
         Returns:
             dict with the resulting `active` slug and whether it is `reachable`.
         """
+        # client.set_active_workspace treats ''/whitespace as "clear"; normalise
+        # here so the response agrees with what was actually stored.
+        if workspace_slug is not None and not workspace_slug.strip():
+            workspace_slug = None
         set_active_workspace(workspace_slug)
 
         if workspace_slug is None:
