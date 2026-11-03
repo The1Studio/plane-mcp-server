@@ -27,6 +27,10 @@ env:
   RELEASE_VERSION: ${{ github.event.inputs.releaseVersion }}
   IS_PRERELEASE: ${{ github.event.inputs.isPrerelease }}
 
+# Explicit least-privilege default; jobs that need more elevate below.
+permissions:
+  contents: read
+
 jobs:
   release_build_setup:
     name: Release Build Setup
@@ -115,6 +119,8 @@ jobs:
     if: ${{ needs.release_build_setup.outputs.build_type == 'Release' }}
     name: Build Release
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write  # softprops/action-gh-release creates the release + tag
     needs:
       [
         release_build_setup,
